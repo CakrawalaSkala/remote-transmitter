@@ -24,6 +24,10 @@
 #include "esp_event.h"
 #include "esp_log.h"
 
+#define DELAY(ms) vTaskDelay(pdMS_TO_TICKS(ms))
+
+static EventGroupHandle_t s_wifi_event_group;
+
 // Global variable
 const float RAD_TO_DEG = 57.2958;
 const float DEG_TO_RAD = 0.0174533;
@@ -32,13 +36,109 @@ const float DEG_TO_RAD = 0.0174533;
 static float q[4] = {1.0, 0.0, 0.0, 0.0};
 
 // UDP Variable
-#define WIFI_SSID "ruter"
-#define WIFI_PASS "caksa123"
-
+// #define WIFI_SSID "ruter"
+// #define WIFI_PASS "caksa123"
+#define WIFI_SSID "ini  wifii"
+#define WIFI_PASS "12345678i"
 #define PORT 3333
-#define HOST_IP_ADDR "192.168.0.110" // 192.168.43.32
+#define HOST_IP_ADDR  "192.168.137.1"//"192.168.0.110" // 192.168.43.32
 
-char payload[128];
+#define PIN_SDA 21
+#define PIN_CLK 22
+#define I2C_ADDRESS 0x1e
+
+#include "HMC5883L.h"
+
+#define RAD_TO_DEG (180.0/M_PI)
+#define DEG_TO_RAD 0.0174533
+
+
+
+// I2C functions implementation
+ esp_err_t hmc5883l_write_byte(uint8_t reg_addr, uint8_t data) {
+    uint8_t write_buf[2] = {reg_addr, data};
+    return i2c_master_write_to_device(I2C_NUM_0, HMC5883L_DEFAULT_ADDRESS, write_buf, sizeof(write_buf), pdMS_TO_TICKS(100));
+}
+
+static esp_err_t hmc5883l_read_bytes(uint8_t reg_addr, uint8_t *data, size_t len) {
+    return i2c_master_write_read_device(I2C_NUM_0, HMC5883L_DEFAULT_ADDRESS, &reg_addr, 1, data, len, pdMS_TO_TICKS(100));
+}
+
+bool hmc5883l_initialize(void) {
+    // Configure sensor
+    // The number of samples averaged per measured output is 8
+    // Data Output Rate is 15Hz
+    // Normal measurement configuration
+    hmc5883l_write_byte(HMC5883L_RA_CONFIG_A, 0x70);
+    
+    // -1.3Ga-->+1.3Ga 1090 counts / Gauss
+    hmc5883l_write_byte(HMC5883L_RA_CONFIG_B, 0x20);
+    // hmc5883l_write_byte(HMC5883L_RA_CONFIG_B , HMC5883L_GAIN_820);
+    // Single-Measurement Mode
+    hmc5883l_write_byte(HMC5883L_RA_MODE, HMC5883L_MODE_CONTINUOUS);
+    
+    return true;
+}
+
+ bool hmc5883l_test_connection(void) {
+    uint8_t data;
+    esp_err_t ret = hmc5883l_read_bytes(HMC5883L_RA_ID_A, &data, 1);
+    return (ret == ESP_OK && data == 0x48);
+}
+
+ bool hmc5883l_get_ready_status(void) {
+    uint8_t status;
+    hmc5883l_read_bytes(HMC5883L_RA_STATUS, &status, 1);
+    return (status & 0x01) != 0;
+}
+
+void hmc5883l_get_heading(int16_t *mx, int16_t *my, int16_t *mz) {
+    uint8_t raw_data[6];
+    hmc5883l_read_bytes(HMC5883L_RA_DATAX_H, raw_data, 6);
+    printf("RAW:%u\n", (unsigned int)raw_data);
+    *mx = (int16_t)((raw_data[0] << 8) | raw_data[1]);
+    *my = (int16_t)((raw_data[2] << 8) | raw_data[3]);
+    *mz = (int16_t)((raw_data[4] << 8) | raw_data[5]);
+}
+
+void hmc5883l_task(void *pvParameters) {
+    // Initialize HMC5883L
+    static const char *TAG = "HMC5883L";
+
+    if (!hmc5883l_initialize()) {
+        ESP_LOGE(TAG, "Failed to initialize HMC5883L");
+        vTaskDelete(NULL);
+    }
+
+    // Verify the I2C connection
+    if (!hmc5883l_test_connection()) {
+        ESP_LOGE(TAG, "HMC5883L not found");
+        vTaskDelete(NULL);
+    }
+
+    
+    while(1) {
+        // Read raw data from mag
+        if (hmc5883l_get_ready_status()) {
+            int16_t mx, my, mz;
+            hmc5883l_get_heading(&mx, &my, &mz);
+            // ESP_LOGI(TAG, "mag=%d %d %d", mx, my, mz);
+            printf("x:%d y:%d z:%d\n", mx, my, mz);
+            // mx = mx + CONFIG_MAGX;
+            // my = my + CONFIG_MAGY;
+            // mz = mz + CONFIG_MAGZ
+        }
+
+        vTaskDelay(10);
+    }
+
+    // Never reach here
+    vTaskDelete(NULL);
+}
+
+static const char *TAG = "static_ip";
+
+char payload[128] = "payload";
 
 struct imu_data
 {
@@ -152,7 +252,6 @@ static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_b
         break;
     case WIFI_EVENT_STA_DISCONNECTED:
         printf("WiFi lost connection WIFI_EVENT_STA_DISCONNECTED ... \n");
-        esp_wifi_start();
         esp_wifi_connect();
         break;
     case IP_EVENT_STA_GOT_IP:
@@ -163,7 +262,7 @@ static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_b
     }
 }
 
-void wifi_connection_sta()
+void wifi_connection()
 {
     nvs_flash_init();
     esp_netif_init();
@@ -182,9 +281,13 @@ void wifi_connection_sta()
             .password = WIFI_PASS}};
     esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_configuration);
     esp_wifi_set_mode(WIFI_MODE_STA);
-
+    printf("wifi connecting");
+    while(esp_wifi_connect() != ESP_OK){
     esp_wifi_start();
     esp_wifi_connect();
+    printf(".");
+    DELAY(100);
+    }
 }
 
 static void udp_client_task(void *pvParameters)
@@ -214,11 +317,11 @@ static void udp_client_task(void *pvParameters)
 
         // Set timeout
         struct timeval timeout;
-        // timeout.tv_sec = 1;
+        timeout.tv_sec = 1;
         timeout.tv_usec = 0;
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
 
-        // ESP_LOGI(TAG, "Socket created, sending to %s:%d", host_ip, PORT);
+        ESP_LOGI(TAG, "Socket created, sending to %s:%d", HOST_IP_ADDR, PORT);
 
         while (1)
         {
@@ -226,17 +329,24 @@ static void udp_client_task(void *pvParameters)
             int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
             if (err < 0)
             {
-                // ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+                printf("%s \n", payload);
+
+                ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
                 break;
             }
             // printf("%s ", payload);
 
-            vTaskDelay(10 / portTICK_PERIOD_MS);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
         }
+        // while(1){
+        //     printf("%s \n", payload);
+        //     vTaskDelay(10 / portTICK_PERIOD_MS);
+        //     break;
+        // }
 
         if (sock != -1)
         {
-            // ESP_LOGE(TAG, "Shutting down socket and restarting...");
+            ESP_LOGE(TAG, "Shutting down socket and restarting...");
             shutdown(sock, 0);
             close(sock);
         }
@@ -594,24 +704,25 @@ void start_process(void *pvParameters)
         {
             yaw_pwm = 1500;
         }
-
-        // sprintf(payload, "r%dp%dy%dm%d\n", roll_pwm, pitch_pwm, yaw_pwm, mode_pwm);
-        sprintf(payload, "r%dp%dt%dy%dm%da%dg%d", roll_pwm, pitch_pwm, throttle_pwm, yaw_pwm, mode_pwm, arming_pwm, magnet_pwm);
+        
+        sprintf(payload, "r%dp%dy%dm%d\n", roll_pwm, pitch_pwm, yaw_pwm, mode_pwm);
         // printf("%d\n", yaw_pwm);
-
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
 
+
+
 void app_main(void)
 {
     i2c_init();
-    adc_init();
-    switch_init();
+    hmc5883l_initialize();
+    // adc_init();
+    // switch_init();
+    // wifi_connection();
 
-    wifi_connection_sta();
-
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-    xTaskCreate(start_process, "start_process", 4096, NULL, 5, NULL);
-    xTaskCreate(udp_client_task, "udp_cilent_task", 4096, NULL, 4, NULL);
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+    // xTaskCreate(start_process, "start_process", 4096, NULL, 5, NULL);
+    xTaskCreate(hmc5883l_task, "hmc5883l_task", 1024*8, NULL, 5, NULL);
+    // xTaskCreate(udp_client_task, "udp_cilent_task", 4096, NULL, 4, NULL);
 }

@@ -4,19 +4,19 @@
 cmake_minimum_required(VERSION 3.5)
 
 file(MAKE_DIRECTORY
-  "C:/Users/marce/esp/esp-idf/components/bootloader/subproject"
-  "G:/ProjectESP-IDF/Remote/build/bootloader"
-  "G:/ProjectESP-IDF/Remote/build/bootloader-prefix"
-  "G:/ProjectESP-IDF/Remote/build/bootloader-prefix/tmp"
-  "G:/ProjectESP-IDF/Remote/build/bootloader-prefix/src/bootloader-stamp"
-  "G:/ProjectESP-IDF/Remote/build/bootloader-prefix/src"
-  "G:/ProjectESP-IDF/Remote/build/bootloader-prefix/src/bootloader-stamp"
+  "C:/Users/Dericc/esp/esp-idf/components/bootloader/subproject"
+  "E:/KULIAH-E/CAKSA/Remote-Transmitter/build/bootloader"
+  "E:/KULIAH-E/CAKSA/Remote-Transmitter/build/bootloader-prefix"
+  "E:/KULIAH-E/CAKSA/Remote-Transmitter/build/bootloader-prefix/tmp"
+  "E:/KULIAH-E/CAKSA/Remote-Transmitter/build/bootloader-prefix/src/bootloader-stamp"
+  "E:/KULIAH-E/CAKSA/Remote-Transmitter/build/bootloader-prefix/src"
+  "E:/KULIAH-E/CAKSA/Remote-Transmitter/build/bootloader-prefix/src/bootloader-stamp"
 )
 
 set(configSubDirs )
 foreach(subDir IN LISTS configSubDirs)
-    file(MAKE_DIRECTORY "G:/ProjectESP-IDF/Remote/build/bootloader-prefix/src/bootloader-stamp/${subDir}")
+    file(MAKE_DIRECTORY "E:/KULIAH-E/CAKSA/Remote-Transmitter/build/bootloader-prefix/src/bootloader-stamp/${subDir}")
 endforeach()
 if(cfgdir)
-  file(MAKE_DIRECTORY "G:/ProjectESP-IDF/Remote/build/bootloader-prefix/src/bootloader-stamp${cfgdir}") # cfgdir has leading slash
+  file(MAKE_DIRECTORY "E:/KULIAH-E/CAKSA/Remote-Transmitter/build/bootloader-prefix/src/bootloader-stamp${cfgdir}") # cfgdir has leading slash
 endif()

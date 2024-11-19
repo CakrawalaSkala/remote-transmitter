@@ -1,15 +1,23 @@
 dependencies:
-  espressif/mpu6050:
-    component_hash: d69219ccb141372b863c511749ffbeab28417ac71c205d7ed7030c308e1b6832
+  espressif/hmc5883l:
+    dependencies: []
     source:
-      service_url: https://api.components.espressif.com/
-      type: service
+      path: E:\KULIAH-E\CAKSA\Remote-Transmitter\components\HMC5883L
+      type: local
+    version: 1.0
+  espressif/mpu6050:
+    dependencies: []
+    source: 
+      path: E:\KULIAH-E\CAKSA\Remote-Transmitter\components\espressif__mpu6050
+      type: local
     version: 1.2.0
   idf:
-    component_hash: null
     source:
       type: idf
-    version: 5.1.2
-manifest_hash: 0157fe24ac79cdb824d54f6958621f8d4859817cd0700fc3cf1747d7af90ece8
+    version: 5.3.1
+direct_dependencies:
+- espressif/mpu6050
+- idf
+manifest_hash: ef3b5149a1949cb68dbcfbd7dbefee08c6f94bb7a2f28b3cb6ff103dd66f18ef
 target: esp32
-version: 1.0.0
+version: 2.0.0

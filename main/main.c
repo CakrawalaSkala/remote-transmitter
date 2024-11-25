@@ -24,132 +24,30 @@
 #include "esp_event.h"
 #include "esp_log.h"
 
-#define DELAY(ms) vTaskDelay(pdMS_TO_TICKS(ms))
-
-static EventGroupHandle_t s_wifi_event_group;
-
 // Global variable
 const float RAD_TO_DEG = 57.2958;
 const float DEG_TO_RAD = 0.0174533;
 
 // Quarternion
-static float q[4] = {1.0, 0.0, 0.0, 0.0};
+static float q[4] = { 1.0, 0.0, 0.0, 0.0 };
 
 // UDP Variable
-// #define WIFI_SSID "ruter"
-// #define WIFI_PASS "caksa123"
-#define WIFI_SSID "ini  wifii"
-#define WIFI_PASS "12345678i"
+#define WIFI_SSID "ruter"
+#define WIFI_PASS "caksa123"
+
 #define PORT 3333
-#define HOST_IP_ADDR  "192.168.137.1"//"192.168.0.110" // 192.168.43.32
+#define HOST_IP_ADDR "192.168.0.110" // 192.168.43.32
 
-#define PIN_SDA 21
-#define PIN_CLK 22
-#define I2C_ADDRESS 0x1e
+char payload[128];
 
-#include "HMC5883L.h"
-
-#define RAD_TO_DEG (180.0/M_PI)
-#define DEG_TO_RAD 0.0174533
-
-
-
-// I2C functions implementation
- esp_err_t hmc5883l_write_byte(uint8_t reg_addr, uint8_t data) {
-    uint8_t write_buf[2] = {reg_addr, data};
-    return i2c_master_write_to_device(I2C_NUM_0, HMC5883L_DEFAULT_ADDRESS, write_buf, sizeof(write_buf), pdMS_TO_TICKS(100));
-}
-
-static esp_err_t hmc5883l_read_bytes(uint8_t reg_addr, uint8_t *data, size_t len) {
-    return i2c_master_write_read_device(I2C_NUM_0, HMC5883L_DEFAULT_ADDRESS, &reg_addr, 1, data, len, pdMS_TO_TICKS(100));
-}
-
-bool hmc5883l_initialize(void) {
-    // Configure sensor
-    // The number of samples averaged per measured output is 8
-    // Data Output Rate is 15Hz
-    // Normal measurement configuration
-    hmc5883l_write_byte(HMC5883L_RA_CONFIG_A, 0x70);
-    
-    // -1.3Ga-->+1.3Ga 1090 counts / Gauss
-    hmc5883l_write_byte(HMC5883L_RA_CONFIG_B, 0x20);
-    // hmc5883l_write_byte(HMC5883L_RA_CONFIG_B , HMC5883L_GAIN_820);
-    // Single-Measurement Mode
-    hmc5883l_write_byte(HMC5883L_RA_MODE, HMC5883L_MODE_CONTINUOUS);
-    
-    return true;
-}
-
- bool hmc5883l_test_connection(void) {
-    uint8_t data;
-    esp_err_t ret = hmc5883l_read_bytes(HMC5883L_RA_ID_A, &data, 1);
-    return (ret == ESP_OK && data == 0x48);
-}
-
- bool hmc5883l_get_ready_status(void) {
-    uint8_t status;
-    hmc5883l_read_bytes(HMC5883L_RA_STATUS, &status, 1);
-    return (status & 0x01) != 0;
-}
-
-void hmc5883l_get_heading(int16_t *mx, int16_t *my, int16_t *mz) {
-    uint8_t raw_data[6];
-    hmc5883l_read_bytes(HMC5883L_RA_DATAX_H, raw_data, 6);
-    printf("RAW:%u\n", (unsigned int)raw_data);
-    *mx = (int16_t)((raw_data[0] << 8) | raw_data[1]);
-    *my = (int16_t)((raw_data[2] << 8) | raw_data[3]);
-    *mz = (int16_t)((raw_data[4] << 8) | raw_data[5]);
-}
-
-void hmc5883l_task(void *pvParameters) {
-    // Initialize HMC5883L
-    static const char *TAG = "HMC5883L";
-
-    if (!hmc5883l_initialize()) {
-        ESP_LOGE(TAG, "Failed to initialize HMC5883L");
-        vTaskDelete(NULL);
-    }
-
-    // Verify the I2C connection
-    if (!hmc5883l_test_connection()) {
-        ESP_LOGE(TAG, "HMC5883L not found");
-        vTaskDelete(NULL);
-    }
-
-    
-    while(1) {
-        // Read raw data from mag
-        if (hmc5883l_get_ready_status()) {
-            int16_t mx, my, mz;
-            hmc5883l_get_heading(&mx, &my, &mz);
-            // ESP_LOGI(TAG, "mag=%d %d %d", mx, my, mz);
-            printf("x:%d y:%d z:%d\n", mx, my, mz);
-            // mx = mx + CONFIG_MAGX;
-            // my = my + CONFIG_MAGY;
-            // mz = mz + CONFIG_MAGZ
-        }
-
-        vTaskDelay(10);
-    }
-
-    // Never reach here
-    vTaskDelete(NULL);
-}
-
-static const char *TAG = "static_ip";
-
-char payload[128] = "payload";
-
-struct imu_data
-{
+struct imu_data {
     /* data */
     float x;
     float y;
     float z;
 };
 
-void i2c_init()
-{
+void i2c_init() {
     i2c_config_t i2c_config = {
         .mode = I2C_MODE_MASTER,
         .sda_io_num = 21,
@@ -162,10 +60,8 @@ void i2c_init()
     i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
 }
 
-void mpu6050_init(mpu6050_handle_t mpu6050)
-{
-    if (mpu6050 == NULL)
-    {
+void mpu6050_init(mpu6050_handle_t mpu6050) {
+    if (mpu6050 == NULL) {
         printf("Failed to initialize MPU6050\n");
         return;
     }
@@ -174,8 +70,7 @@ void mpu6050_init(mpu6050_handle_t mpu6050)
     vTaskDelay(1 / portTICK_PERIOD_MS);
 }
 
-void adc_init()
-{
+void adc_init() {
     esp_adc_cal_characteristics_t adc1_chars;
 
     // Config Pin and Voltage Range for Pin D33 or ADC1_CHANNEL_5
@@ -186,8 +81,7 @@ void adc_init()
     esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_DEFAULT, 0, &adc1_chars);
 }
 
-void switch_init()
-{
+void switch_init() {
     /*Switch Mode Init pin : D5 or GPIO 5 */
     gpio_config_t io_conf1 = {
         .intr_type = GPIO_INTR_DISABLE,        // Disable interrupt
@@ -237,33 +131,31 @@ void switch_init()
         .pull_up_en = GPIO_PULLUP_ENABLE       // Disable pull-up mode
     };
     gpio_config(&io_conf5);
-    
+
 }
 
-static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
-{
-    switch (event_id)
-    {
-    case WIFI_EVENT_STA_START:
-        printf("WiFi connecting WIFI_EVENT_STA_START ... \n");
-        break;
-    case WIFI_EVENT_STA_CONNECTED:
-        printf("WiFi connected WIFI_EVENT_STA_CONNECTED ... \n");
-        break;
-    case WIFI_EVENT_STA_DISCONNECTED:
-        printf("WiFi lost connection WIFI_EVENT_STA_DISCONNECTED ... \n");
-        esp_wifi_connect();
-        break;
-    case IP_EVENT_STA_GOT_IP:
-        printf("WiFi got IP ... \n\n");
-        break;
-    default:
-        break;
+static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+    switch (event_id) {
+        case WIFI_EVENT_STA_START:
+            printf("WiFi connecting WIFI_EVENT_STA_START ... \n");
+            break;
+        case WIFI_EVENT_STA_CONNECTED:
+            printf("WiFi connected WIFI_EVENT_STA_CONNECTED ... \n");
+            break;
+        case WIFI_EVENT_STA_DISCONNECTED:
+            printf("WiFi lost connection WIFI_EVENT_STA_DISCONNECTED ... \n");
+            esp_wifi_start();
+            esp_wifi_connect();
+            break;
+        case IP_EVENT_STA_GOT_IP:
+            printf("WiFi got IP ... \n\n");
+            break;
+        default:
+            break;
     }
 }
 
-void wifi_connection()
-{
+void wifi_connection_sta() {
     nvs_flash_init();
     esp_netif_init();
     esp_event_loop_create_default();
@@ -278,20 +170,15 @@ void wifi_connection()
     wifi_config_t wifi_configuration = {
         .sta = {
             .ssid = WIFI_SSID,
-            .password = WIFI_PASS}};
+            .password = WIFI_PASS} };
     esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_configuration);
     esp_wifi_set_mode(WIFI_MODE_STA);
-    printf("wifi connecting");
-    while(esp_wifi_connect() != ESP_OK){
+
     esp_wifi_start();
     esp_wifi_connect();
-    printf(".");
-    DELAY(100);
-    }
 }
 
-static void udp_client_task(void *pvParameters)
-{
+static void udp_client_task(void *pvParameters) {
     /* General Variable */
     // char *payload = (char *)pvParameters;
     static const char *TAG = "UDP SOCKET CLIENT";
@@ -306,47 +193,35 @@ static void udp_client_task(void *pvParameters)
     addr_family = AF_INET;
     ip_protocol = IPPROTO_IP;
 
-    while (1)
-    {
+    while (1) {
         int sock = socket(addr_family, SOCK_DGRAM, ip_protocol);
-        if (sock < 0)
-        {
+        if (sock < 0) {
             ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
             break;
         }
 
         // Set timeout
         struct timeval timeout;
-        timeout.tv_sec = 1;
+        // timeout.tv_sec = 1;
         timeout.tv_usec = 0;
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
 
-        ESP_LOGI(TAG, "Socket created, sending to %s:%d", HOST_IP_ADDR, PORT);
+        // ESP_LOGI(TAG, "Socket created, sending to %s:%d", host_ip, PORT);
 
-        while (1)
-        {
+        while (1) {
 
             int err = sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-            if (err < 0)
-            {
-                printf("%s \n", payload);
-
-                ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+            if (err < 0) {
+                // ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
                 break;
             }
             // printf("%s ", payload);
 
-            vTaskDelay(100 / portTICK_PERIOD_MS);
+            vTaskDelay(10 / portTICK_PERIOD_MS);
         }
-        // while(1){
-        //     printf("%s \n", payload);
-        //     vTaskDelay(10 / portTICK_PERIOD_MS);
-        //     break;
-        // }
 
-        if (sock != -1)
-        {
-            ESP_LOGE(TAG, "Shutting down socket and restarting...");
+        if (sock != -1) {
+            // ESP_LOGE(TAG, "Shutting down socket and restarting...");
             shutdown(sock, 0);
             close(sock);
         }
@@ -354,15 +229,11 @@ static void udp_client_task(void *pvParameters)
     vTaskDelete(NULL);
 }
 
-float mapValue(float value, float inputMin, float inputMax, float outputMin, float outputMax)
-{
+float mapValue(float value, float inputMin, float inputMax, float outputMin, float outputMax) {
     // Ensure the input value is within the input range
-    if (value < inputMin)
-    {
+    if (value < inputMin) {
         value = inputMin;
-    }
-    else if (value > inputMax)
-    {
+    } else if (value > inputMax) {
         value = inputMax;
     }
 
@@ -372,14 +243,12 @@ float mapValue(float value, float inputMin, float inputMax, float outputMin, flo
     return ((value - inputMin) * outputRange / inputRange) + outputMin;
 }
 
-int get_throttle()
-{
+int get_throttle() {
     uint16_t pot_value, pot_pwm;
     uint16_t sum_1 = 0;
 
     // Multisampling
-    for (uint8_t i = 0; i < 64; i++)
-    {
+    for (uint8_t i = 0; i < 64; i++) {
         /* code */
         pot_value = adc1_get_raw(ADC1_CHANNEL_5);
         sum_1 += pot_value;
@@ -390,8 +259,7 @@ int get_throttle()
     return pot_pwm;
 }
 
-void Mahony_Update(float ax, float ay, float az, float gx, float gy, float gz, float delta_t)
-{
+void Mahony_Update(float ax, float ay, float az, float gx, float gy, float gz, float delta_t) {
     // PID Variable
     const float Kp = 30.0;
     const float Ki = 0.0;
@@ -409,8 +277,7 @@ void Mahony_Update(float ax, float ay, float az, float gx, float gy, float gz, f
     tmp = ax * ax + ay * ay + az * az;
     // tmp = 1;
     // ignore accelerometer if false (tested OK, SJR)
-    if (tmp > 0.0)
-    {
+    if (tmp > 0.0) {
         // Normalise accelerometer (assumed to measure the direction of gravity in body frame)
         recipNorm = 1.0 / sqrt(tmp);
         ax *= recipNorm;
@@ -429,8 +296,7 @@ void Mahony_Update(float ax, float ay, float az, float gx, float gy, float gz, f
         ez = (ax * vy - ay * vx);
 
         // Compute and apply to gyro term the integral feedback, if enabled
-        if (Ki > 0.0f)
-        {
+        if (Ki > 0.0f) {
             ix += Ki * ex * delta_t; // integral error scaled by Ki
             iy += Ki * ey * delta_t;
             iz += Ki * ez * delta_t;
@@ -470,8 +336,7 @@ void Mahony_Update(float ax, float ay, float az, float gx, float gy, float gz, f
     q[2] = q[2] * recipNorm;
 }
 
-void sensor_read(struct imu_data *gyro, struct imu_data *acel, mpu6050_handle_t mpu6050)
-{
+void sensor_read(struct imu_data *gyro, struct imu_data *acel, mpu6050_handle_t mpu6050) {
     /* MPU6050 variable*/
     esp_err_t err_gyro, err_acce;
     mpu6050_raw_gyro_value_t gyro_data;
@@ -479,16 +344,14 @@ void sensor_read(struct imu_data *gyro, struct imu_data *acel, mpu6050_handle_t 
 
     /* Read Gyro Data */
     err_gyro = mpu6050_get_raw_gyro(mpu6050, &gyro_data);
-    if (err_gyro != ESP_OK)
-    {
+    if (err_gyro != ESP_OK) {
         /* code */
         printf("Failed to get gyro data\n");
     }
 
     /* Read Acce Data */
     err_acce = mpu6050_get_raw_acce(mpu6050, &acce_data);
-    if (err_acce != ESP_OK)
-    {
+    if (err_acce != ESP_OK) {
         /* code */
         printf("Failed to get acce data\n");
     }
@@ -503,8 +366,7 @@ void sensor_read(struct imu_data *gyro, struct imu_data *acel, mpu6050_handle_t 
     acel->z = acce_data.raw_acce_z;
 }
 
-void start_process(void *pvParameters)
-{
+void start_process(void *pvParameters) {
     /*Imu Data Raw*/
     struct imu_data gyro_raw;
     struct imu_data acel_raw;
@@ -523,7 +385,7 @@ void start_process(void *pvParameters)
 
     /*Constant Variable*/
     float const gyro_constant = 250.0 / 32768.0;
-    float A_offset[6] = {265.0, -80.0, -700.0, 0.994, 1.000, 1.014};
+    float A_offset[6] = { 265.0, -80.0, -700.0, 0.994, 1.000, 1.014 };
 
     /* GPIO and ADC Variable*/
     uint16_t mode_1, mode_2, mode_pwm, arming, arming_pwm, throttle_pwm, magnet, magnet_pwm, poshold;
@@ -536,8 +398,7 @@ void start_process(void *pvParameters)
     // char *payload = (char *)pvParameters;
 
     /*Calibrate Gyro*/
-    for (int i = 0; i < 2000; i++)
-    {
+    for (int i = 0; i < 2000; i++) {
         /* code */
         sensor_read(&gyro_raw, &acel_raw, mpu6050);
         gyro_offset.x += gyro_raw.x;
@@ -549,8 +410,7 @@ void start_process(void *pvParameters)
     gyro_offset.z /= 2000;
     printf("Gyro Calibration done !!\n");
 
-    while (true)
-    {
+    while (true) {
         /* code */
         sensor_read(&gyro_raw, &acel_raw, mpu6050);
 
@@ -583,22 +443,16 @@ void start_process(void *pvParameters)
         roll *= RAD_TO_DEG;
 
         /*Limit Roll  Angle*/
-        if (roll < -70)
-        {
+        if (roll < -70) {
             roll = -70;
-        }
-        else if (roll > 70)
-        {
+        } else if (roll > 70) {
             roll = 70;
         }
 
         /*Limit Pitch Angle*/
-        if (pitch < -65)
-        {
+        if (pitch < -65) {
             pitch = -65;
-        }
-        else if (pitch > 65)
-        {
+        } else if (pitch > 65) {
             pitch = 65;
         }
 
@@ -615,114 +469,89 @@ void start_process(void *pvParameters)
 
         yaw_1 = yaw;
         // Ensure yaw angle is within the range -180 to 180 degrees
-        if (yaw > 180.0)
-        {
+        if (yaw > 180.0) {
             yaw -= 360.0;
-        }
-        else if (yaw < -180.0)
-        {
+        } else if (yaw < -180.0) {
             yaw += 360.0;
         }
 
         // Ensure yaw angle is within the range -90 to 90 degrees
-        if (yaw > 90.0)
-        {
+        if (yaw > 90.0) {
             yaw -= 180.0;
-        }
-        else if (yaw < -90.0)
-        {
+        } else if (yaw < -90.0) {
             yaw += 180.0;
         }
 
         // Limit PWM Value
-        if (yaw_1 < -90)
-        {
+        if (yaw_1 < -90) {
             yaw_pwm = 1000;
-        }
-        else if (yaw_1 > 90)
-        {
+        } else if (yaw_1 > 90) {
             yaw_pwm = 2000;
-        }
-        else
-        {
+        } else {
             yaw_pwm = ((yaw + 90) / 180) * (2000 - 1000) + 1000;
         }
 
         // Deadzone
-        if (yaw_pwm > 1450 && yaw_pwm < 1550){
+        if (yaw_pwm > 1450 && yaw_pwm < 1550) {
             yaw_pwm = 1500;
-        }else if (yaw_pwm > 1450){
+        } else if (yaw_pwm > 1450) {
             yaw_pwm += 50;
-        }else if (yaw_pwm < 1550){
+        } else if (yaw_pwm < 1550) {
             yaw_pwm -= 50;
         }
 
         /*Switch Mode*/
         mode_1 = gpio_get_level(GPIO_NUM_5);
         mode_2 = gpio_get_level(GPIO_NUM_19);
-        if (mode_1 == 1 && mode_2 == 0)
-        {
+        if (mode_1 == 1 && mode_2 == 0) {
             mode_pwm = 2000; // pos hold
             // if (throttle_pwm > 1430 && throttle_pwm < 1570){
             //     throttle_pwm = 1500;
             // }
-        }
-        else if (mode_1 == 0 && mode_2 == 1)
-        {
+        } else if (mode_1 == 0 && mode_2 == 1) {
             mode_pwm = 1000; // Stabilize
-        }
-        else
-        {
+        } else {
             mode_pwm = 1500; // Land
         }
 
         /*Switch Arming*/
         arming = gpio_get_level(GPIO_NUM_4);
-        if (arming == 1)
-        {
+        if (arming == 1) {
             arming_pwm = 2000;
-        }
-        else
-        {
+        } else {
             arming_pwm = 1000;
         }
 
         /*Switch Magnet*/
         magnet = gpio_get_level(GPIO_NUM_26);
-        if (magnet == 1)
-        {
+        if (magnet == 1) {
             magnet_pwm = 2000;
-        }
-        else
-        {
-            magnet_pwm= 1000;
+        } else {
+            magnet_pwm = 1000;
         }
 
         /*Switch Force Poshold*/
         poshold = gpio_get_level(GPIO_NUM_15);
-        if (poshold == 1)
-        {
+        if (poshold == 1) {
             yaw_pwm = 1500;
         }
-        
-        sprintf(payload, "r%dp%dy%dm%d\n", roll_pwm, pitch_pwm, yaw_pwm, mode_pwm);
+
+        // sprintf(payload, "r%dp%dy%dm%d\n", roll_pwm, pitch_pwm, yaw_pwm, mode_pwm);
+        sprintf(payload, "r%dp%dt%dy%dm%da%dg%d", roll_pwm, pitch_pwm, throttle_pwm, yaw_pwm, mode_pwm, arming_pwm, magnet_pwm);
         // printf("%d\n", yaw_pwm);
+
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
 
-
-
-void app_main(void)
-{
+void app_main(void) {
     i2c_init();
-    hmc5883l_initialize();
-    // adc_init();
-    // switch_init();
-    // wifi_connection();
+    adc_init();
+    switch_init();
 
-    vTaskDelay(500 / portTICK_PERIOD_MS);
-    // xTaskCreate(start_process, "start_process", 4096, NULL, 5, NULL);
-    xTaskCreate(hmc5883l_task, "hmc5883l_task", 1024*8, NULL, 5, NULL);
-    // xTaskCreate(udp_client_task, "udp_cilent_task", 4096, NULL, 4, NULL);
+    wifi_connection_sta();
+
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    xTaskCreate(start_process, "start_process", 4096, NULL, 5, NULL);
+    xTaskCreate(udp_client_task, "udp_cilent_task", 4096, NULL, 4, NULL);
 }

@@ -7,10 +7,21 @@
 	"idf.openOcdConfigs": ["board/esp32-wrover-kit-3.3v.cfg"],
 	"C_Cpp.errorSquiggles": "enabled",
 	"files.associations": {
+		"*.embeddedhtml": "html",
+		"*.pl": "prolog",
 		"*.h": "c",
 		"*.inc": "c",
-		"*.tcc": "cpp"
+		"*.tcc": "cpp",
+		"random": "c",
+		"xutility": "c",
+		"charconv": "c",
+		"chrono": "c",
+		"format": "c",
+		"locale": "c",
+		"ostream": "c",
+		"regex": "c",
+		"xlocale": "c"
 	},
-	"idf.portWin": "COM10",
+	"idf.portWin": "COM3",
 	"idf.flashType": "UART"
 }

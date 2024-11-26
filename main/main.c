@@ -15,6 +15,7 @@
 
 #include "nvs_flash.h"
 #include "mpu6050.h"
+#include "imu.h"
 #include "time.h"
 #include "esp_timer.h"
 
@@ -24,13 +25,6 @@
 #include "esp_event.h"
 #include "esp_log.h"
 
-// Global variable
-const float RAD_TO_DEG = 57.2958;
-const float DEG_TO_RAD = 0.0174533;
-
-// Quarternion
-static float q[4] = { 1.0, 0.0, 0.0, 0.0 };
-
 // UDP Variable
 #define WIFI_SSID "ruter"
 #define WIFI_PASS "caksa123"
@@ -39,13 +33,6 @@ static float q[4] = { 1.0, 0.0, 0.0, 0.0 };
 #define HOST_IP_ADDR "192.168.0.110" // 192.168.43.32
 
 char payload[128];
-
-struct imu_data {
-    /* data */
-    float x;
-    float y;
-    float z;
-};
 
 void i2c_init() {
     i2c_config_t i2c_config = {
@@ -58,16 +45,6 @@ void i2c_init() {
     };
     i2c_param_config(I2C_NUM_0, &i2c_config);
     i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
-}
-
-void mpu6050_init(mpu6050_handle_t mpu6050) {
-    if (mpu6050 == NULL) {
-        printf("Failed to initialize MPU6050\n");
-        return;
-    }
-    mpu6050_wake_up(mpu6050);
-    mpu6050_config(mpu6050, ACCE_FS_2G, GYRO_FS_250DPS);
-    vTaskDelay(1 / portTICK_PERIOD_MS);
 }
 
 void adc_init() {
@@ -230,12 +207,8 @@ static void udp_client_task(void *pvParameters) {
 }
 
 float mapValue(float value, float inputMin, float inputMax, float outputMin, float outputMax) {
-    // Ensure the input value is within the input range
-    if (value < inputMin) {
-        value = inputMin;
-    } else if (value > inputMax) {
-        value = inputMax;
-    }
+    if (value < inputMin) return outputMin;
+    else if (value > inputMax) return outputMax;
 
     // Map the input value to the output range
     float inputRange = inputMax - inputMin;
@@ -243,204 +216,50 @@ float mapValue(float value, float inputMin, float inputMax, float outputMin, flo
     return ((value - inputMin) * outputRange / inputRange) + outputMin;
 }
 
-int get_throttle() {
-    uint16_t pot_value, pot_pwm;
-    uint16_t sum_1 = 0;
+void start_process() {
+    // IMU data
+    struct full_imu_data left_imu_data;
+    left_imu_data.q[0] = 1.0;
 
-    // Multisampling
-    for (uint8_t i = 0; i < 64; i++) {
-        /* code */
-        pot_value = adc1_get_raw(ADC1_CHANNEL_5);
-        sum_1 += pot_value;
-    }
-    sum_1 /= 64;
-
-    pot_pwm = mapValue(sum_1, 0, 200, 1000, 1900);
-    return pot_pwm;
-}
-
-void Mahony_Update(float ax, float ay, float az, float gx, float gy, float gz, float delta_t) {
-    // PID Variable
-    const float Kp = 30.0;
-    const float Ki = 0.0;
-
-    /* AHRS Variable */
-    float recipNorm;
-    float vx, vy, vz;
-    float ex, ey, ez;
-    float qa, qb, qc;
-
-    float ix = 0.0, iy = 0.0, iz = 0.0;
-    float tmp;
-
-    // Compute feedback only if accelerometer measurement valid (avoids NaN in accelerometer normalisation)
-    tmp = ax * ax + ay * ay + az * az;
-    // tmp = 1;
-    // ignore accelerometer if false (tested OK, SJR)
-    if (tmp > 0.0) {
-        // Normalise accelerometer (assumed to measure the direction of gravity in body frame)
-        recipNorm = 1.0 / sqrt(tmp);
-        ax *= recipNorm;
-        ay *= recipNorm;
-        az *= recipNorm;
-
-        // Estimated direction of gravity in the body frame (factor of two divided out)
-        vx = q[1] * q[3] - q[0] * q[2];
-        vy = q[0] * q[1] + q[2] * q[3];
-        vz = q[0] * q[0] - 0.5f + q[3] * q[3];
-
-        // Error is cross product between estimated and measured direction of gravity in body frame
-        // (half the actual magnitude)
-        ex = (ay * vz - az * vy);
-        ey = (az * vx - ax * vz);
-        ez = (ax * vy - ay * vx);
-
-        // Compute and apply to gyro term the integral feedback, if enabled
-        if (Ki > 0.0f) {
-            ix += Ki * ex * delta_t; // integral error scaled by Ki
-            iy += Ki * ey * delta_t;
-            iz += Ki * ez * delta_t;
-            gx += ix; // apply integral feedback
-            gy += iy;
-            gz += iz;
-        }
-
-        // Apply proportional feedback to gyro term
-        gx += Kp * ex;
-        gy += Kp * ey;
-        gz += Kp * ez;
-    }
-
-    // Integrate rate of change of quaternion, given by gyro term
-    // rate of change = current orientation quaternion (qmult) gyro rate
-
-    delta_t = 0.5 * delta_t;
-    gx *= delta_t; // pre-multiply common factors
-    gy *= delta_t;
-    gz *= delta_t;
-    qa = q[0];
-    qb = q[1];
-    qc = q[2];
-
-    // add qmult*delta_t to current orientation
-    q[0] += (-qb * gx - qc * gy - q[3] * gz);
-    q[1] += (qa * gx + qc * gz - q[3] * gy);
-    q[2] += (qa * gy - qb * gz + q[3] * gx);
-    q[3] += (qa * gz + qb * gy - qc * gx);
-
-    // Normalise quaternion
-    recipNorm = 1.0 / sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
-
-    q[0] = q[0] * recipNorm;
-    q[1] = q[1] * recipNorm;
-    q[2] = q[2] * recipNorm;
-}
-
-void sensor_read(struct imu_data *gyro, struct imu_data *acel, mpu6050_handle_t mpu6050) {
-    /* MPU6050 variable*/
-    esp_err_t err_gyro, err_acce;
-    mpu6050_raw_gyro_value_t gyro_data;
-    mpu6050_raw_acce_value_t acce_data;
-
-    /* Read Gyro Data */
-    err_gyro = mpu6050_get_raw_gyro(mpu6050, &gyro_data);
-    if (err_gyro != ESP_OK) {
-        /* code */
-        printf("Failed to get gyro data\n");
-    }
-
-    /* Read Acce Data */
-    err_acce = mpu6050_get_raw_acce(mpu6050, &acce_data);
-    if (err_acce != ESP_OK) {
-        /* code */
-        printf("Failed to get acce data\n");
-    }
-
-    /*Store Variable*/
-    gyro->x = gyro_data.raw_gyro_x;
-    gyro->y = gyro_data.raw_gyro_y;
-    gyro->z = gyro_data.raw_gyro_z;
-
-    acel->x = acce_data.raw_acce_x;
-    acel->y = acce_data.raw_acce_y;
-    acel->z = acce_data.raw_acce_z;
-}
-
-void start_process(void *pvParameters) {
-    /*Imu Data Raw*/
-    struct imu_data gyro_raw;
-    struct imu_data acel_raw;
-
-    /*Imu data processed*/
-    struct imu_data gyro_scaled;
-    struct imu_data acel_scaled;
-    struct imu_data gyro_offset;
+    struct full_imu_data right_imu_data;
+    right_imu_data.q[0] = 1.0;
 
     /*Roll Pitch Yaw variable*/
-    float roll, pitch, yaw, yaw_1;
+    float roll, pitch, throttle, yaw, yaw_1;
     uint16_t roll_pwm, pitch_pwm, yaw_pwm;
-
-    /*Timing Variable*/
-    float now = 0, last = 0, delta_t = 0;
-
-    /*Constant Variable*/
-    float const gyro_constant = 250.0 / 32768.0;
-    float A_offset[6] = { 265.0, -80.0, -700.0, 0.994, 1.000, 1.014 };
 
     /* GPIO and ADC Variable*/
     uint16_t mode_1, mode_2, mode_pwm, arming, arming_pwm, throttle_pwm, magnet, magnet_pwm, poshold;
 
     // Initialize MPU6050
-    mpu6050_handle_t mpu6050 = mpu6050_create(I2C_NUM_0, MPU6050_I2C_ADDRESS);
-    mpu6050_init(mpu6050);
+    mpu6050_handle_t left_imu = imu_init(I2C_NUM_0, MPU6050_I2C_ADDRESS_1);
+    mpu6050_handle_t right_imu = imu_init(I2C_NUM_0, MPU6050_I2C_ADDRESS);
 
     /* Payload Variable */
     // char *payload = (char *)pvParameters;
 
     /*Calibrate Gyro*/
     for (int i = 0; i < 2000; i++) {
-        /* code */
-        sensor_read(&gyro_raw, &acel_raw, mpu6050);
-        gyro_offset.x += gyro_raw.x;
-        gyro_offset.y += gyro_raw.y;
-        gyro_offset.z += gyro_raw.z;
+        imu_read_raw(left_imu, &left_imu_data.gyro, &left_imu_data.acce);
+        imu_read_raw(right_imu, &right_imu_data.gyro, &right_imu_data.acce);
+
+        imu_add(&left_imu_data.offset, left_imu_data.gyro);
+        imu_add(&right_imu_data.offset, right_imu_data.gyro);
     }
-    gyro_offset.x /= 2000;
-    gyro_offset.y /= 2000;
-    gyro_offset.z /= 2000;
+    imu_divide_single(&left_imu_data.offset, 2000);
+    imu_divide_single(&right_imu_data.offset, 2000);
     printf("Gyro Calibration done !!\n");
 
     while (true) {
-        /* code */
-        sensor_read(&gyro_raw, &acel_raw, mpu6050);
+        imu_read(left_imu, &left_imu_data);
+        imu_read(right_imu, &right_imu_data);
 
-        /*Apply Offset & Scale Constant*/
-        gyro_scaled.x = (gyro_raw.x - gyro_offset.x) * DEG_TO_RAD * gyro_constant;
-        gyro_scaled.y = (gyro_raw.y - gyro_offset.y) * DEG_TO_RAD * gyro_constant;
-        gyro_scaled.z = (gyro_raw.z - gyro_offset.z) * DEG_TO_RAD * gyro_constant;
+        /*Get Roll Pitch Throttle Yaw*/
+        roll = right_imu_data.processed.y;
+        pitch = right_imu_data.processed.x;
 
-        acel_scaled.x = (acel_raw.x - A_offset[0]) * A_offset[3];
-        acel_scaled.y = (acel_raw.y - A_offset[1]) * A_offset[4];
-        acel_scaled.z = (acel_raw.z - A_offset[2]) * A_offset[5];
-
-        /*Get ESP Timing*/
-        now = esp_timer_get_time();
-        delta_t = (now - last) * 0.000001;
-        last = now;
-        // printf("%f, ", delta_t);
-        /*Call Mahony Update*/
-        Mahony_Update(acel_scaled.x, acel_scaled.y, acel_scaled.z, gyro_scaled.x, gyro_scaled.y, gyro_scaled.z, delta_t);
-
-        /*Get Roll Pitch Yaw Angle*/
-        roll = atan2((q[0] * q[1] + q[2] * q[3]), 0.5 - (q[1] * q[1] + q[2] * q[2]));
-        pitch = asin(2.0 * (q[0] * q[2] - q[1] * q[3]));
-        // conventional yaw increases clockwise from North. Note that the MPU-6050 does not know where True North is.
-        yaw = -atan2((q[1] * q[2] + q[0] * q[3]), 0.5 - (q[2] * q[2] + q[3] * q[3]));
-
-        // Convert to degrees
-        yaw *= RAD_TO_DEG;
-        pitch *= RAD_TO_DEG;
-        roll *= RAD_TO_DEG;
+        throttle = left_imu_data.processed.x;
+        yaw = left_imu_data.processed.y;
 
         /*Limit Roll  Angle*/
         if (roll < -70) {
@@ -459,7 +278,7 @@ void start_process(void *pvParameters) {
         /*Mapping degree to PWM*/
         roll_pwm = mapValue(roll, -45, 45, 1000, 2000);
         pitch_pwm = mapValue(pitch, -45, 45, 2000, 1000);
-        throttle_pwm = get_throttle();
+        throttle_pwm = mapValue(throttle, -45, 45, 1000, 2000);
        // yaw_pwm = 1500;
 
         /* 0 to 360 degrees with Relative North Position */
@@ -533,11 +352,12 @@ void start_process(void *pvParameters) {
         /*Switch Force Poshold*/
         poshold = gpio_get_level(GPIO_NUM_15);
         if (poshold == 1) {
-            yaw_pwm = 1500;
+            // yaw_pwm = 1500;
         }
 
         // sprintf(payload, "r%dp%dy%dm%d\n", roll_pwm, pitch_pwm, yaw_pwm, mode_pwm);
-        sprintf(payload, "r%dp%dt%dy%dm%da%dg%d", roll_pwm, pitch_pwm, throttle_pwm, yaw_pwm, mode_pwm, arming_pwm, magnet_pwm);
+        // sprintf(payload, "r%dp%dt%dy%dm%da%dg%d", roll_pwm, pitch_pwm, throttle_pwm, yaw_pwm, mode_pwm, arming_pwm, magnet_pwm);
+        printf("r%dp%dt%dy%d\n", roll_pwm, pitch_pwm, throttle_pwm, yaw_pwm);
         // printf("%d\n", yaw_pwm);
 
         vTaskDelay(10 / portTICK_PERIOD_MS);
@@ -546,12 +366,14 @@ void start_process(void *pvParameters) {
 
 void app_main(void) {
     i2c_init();
-    adc_init();
-    switch_init();
+    // adc_init();
+    // switch_init();
 
-    wifi_connection_sta();
+    // wifi_connection_sta();
 
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-    xTaskCreate(start_process, "start_process", 4096, NULL, 5, NULL);
-    xTaskCreate(udp_client_task, "udp_cilent_task", 4096, NULL, 4, NULL);
+    start_process();
+
+    // vTaskDelay(1000 / portTICK_PERIOD_MS);
+    // xTaskCreate(start_process, "start_process", 4096, NULL, 5, NULL);
+    // xTaskCreate(udp_client_task, "udp_cilent_task", 4096, NULL, 4, NULL);
 }

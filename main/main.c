@@ -3,6 +3,9 @@
 #include <math.h>
 #include <stdbool.h>
 
+#include "config.h"
+#include "crsf.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -33,6 +36,17 @@
 #define HOST_IP_ADDR "192.168.0.110" // 192.168.43.32
 
 char payload[128];
+
+int loopCounts;
+
+uint8_t crsfPacket[CRSF_PACKET_SIZE];
+uint8_t crsfCmdPacket[CRSF_CMD_PACKET_SIZE];
+int16_t rcChannels[CRSF_MAX_CHANNEL];
+uint32_t crsfTime = 0;
+
+CRSF crsfclass;
+
+
 
 void i2c_init() {
     i2c_config_t i2c_config = {
@@ -217,6 +231,8 @@ float mapValue(float value, float inputMin, float inputMax, float outputMin, flo
 }
 
 void start_process() {
+
+
     // IMU data
     struct full_imu_data left_imu_data;
     left_imu_data.q[0] = 1.0;
@@ -354,13 +370,45 @@ void start_process() {
         if (poshold == 1) {
             // yaw_pwm = 1500;
         }
-
+        rcChannels[0] = roll_pwm;
+        rcChannels[1] = pitch_pwm;
+        rcChannels[2] = throttle_pwm;
+        rcChannels[3] = yaw_pwm;
+        rcChannels[4]= magnet_pwm;
+        rcChannels[5] = arming_pwm;
+        rcChannels[6] = mode_pwm;
         // sprintf(payload, "r%dp%dy%dm%d\n", roll_pwm, pitch_pwm, yaw_pwm, mode_pwm);
         // sprintf(payload, "r%dp%dt%dy%dm%da%dg%d", roll_pwm, pitch_pwm, throttle_pwm, yaw_pwm, mode_pwm, arming_pwm, magnet_pwm);
         printf("r%dp%dt%dy%d\n", roll_pwm, pitch_pwm, throttle_pwm, yaw_pwm);
         // printf("%d\n", yaw_pwm);
 
         vTaskDelay(10 / portTICK_PERIOD_MS);
+    }
+}
+
+void elrs_task(void *pvParameters){
+    crsfclass.begin();
+    while(1){
+    if(loopCounts <= 500){ //kirim 500 packet
+        crsfclass.crsfPrepareDataPacket(crsfPacket, rcChannels);
+        crsfclass.CrsfWritePacket(crsfPacket, CRSF_PACKET_SIZE);
+        loopCounts++;
+    }
+    if(loopCounts >500 && loopCounts <=505){
+        crsfclass.crsfPrepareCmdPacket(crsfCmdPacket, ELRS_PKT_RATE_COMMAND, SETTING_1_PktRate);
+        // buildElrsPacket(crsfCmdPacket,ELRS_WIFI_COMMAND,0x01);
+        crsfclass.CrsfWritePacket(crsfCmdPacket, CRSF_CMD_PACKET_SIZE);
+    }
+    if(loopCounts >505 && loopCounts <=510){
+        crsfclass.crsfPrepareCmdPacket(crsfCmdPacket, ELRS_POWER_COMMAND, SETTING_2_Power);
+        // buildElrsPacket(crsfCmdPacket,ELRS_WIFI_COMMAND,0x01);
+        crsfclass.CrsfWritePacket(crsfCmdPacket, CRSF_CMD_PACKET_SIZE);
+    }
+    if(loopCounts > 510) loopCounts = 0;
+    
+    vTaskDelay(2/portTICK_PERIOD_MS);
+
+
     }
 }
 
@@ -372,7 +420,7 @@ void app_main(void) {
     // wifi_connection_sta();
 
     start_process();
-
+    xTaskCreate(elrs_task, "elrs task",  4096, NULL, 2, NULL);
     // vTaskDelay(1000 / portTICK_PERIOD_MS);
     // xTaskCreate(start_process, "start_process", 4096, NULL, 5, NULL);
     // xTaskCreate(udp_client_task, "udp_cilent_task", 4096, NULL, 4, NULL);

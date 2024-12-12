@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <math.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 #include "esp_timer.h"

@@ -20,7 +20,8 @@
 		"locale": "c",
 		"ostream": "c",
 		"regex": "c",
-		"xlocale": "c"
+		"xlocale": "c",
+		"cstdint": "cpp"
 	},
 	"idf.portWin": "COM3",
 	"idf.flashType": "UART"

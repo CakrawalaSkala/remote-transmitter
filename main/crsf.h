@@ -33,7 +33,7 @@
 #define CRSF_TIME_NEEDED_PER_FRAME_US   1100 // 700 ms + 400 ms for potential ad-hoc request
 // #define SERIAL_BAUDRATE                 115200 //low baud for Arduino Nano , the TX module will auto detect baud. 115200/400000
 // #define CRSF_TIME_BETWEEN_FRAMES_US     4000 // 4 ms 250Hz
-#define SERIAL_BAUDRATE                 400000
+#define SERIAL_BAUDRATE                 460800 //400000
 #define CRSF_TIME_BETWEEN_FRAMES_US     1666 // 1.6 ms 500Hz
 #define CRSF_PAYLOAD_OFFSET             offsetof(crsfFrameDef_t, type)
 #define CRSF_MSP_RX_BUF_SIZE            128
@@ -59,12 +59,12 @@
 #define port                            Serial
 
 
-typedef struct {
-    void (*begin)(void);
-    void (*crsfPrepareDataPacket)(uint8_t packet[], int16_t channels[]);
-    void (*crsfPrepareCmdPacket)(uint8_t packetCmd[], uint8_t command, uint8_t value);
-    void (*CrsfWritePacket)(uint8_t packet[], uint8_t packetLength);
-} CRSF;
+
+    // void (*begin)(void);
+    void crsf_prepare_data_packet(uint8_t packet[], int16_t channels[]);
+    void crsf_prepare_cmd_packet(uint8_t packetCmd[], uint8_t command, uint8_t value);
+    // void (*CrsfWritePacket)(uint8_t packet[], uint8_t packetLength);
+
 
 /* ESP32 Team900
 https://github.com/danxdz/simpleTx_esp32/blob/master/src/Simple_TX.ino

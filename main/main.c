@@ -15,6 +15,7 @@
 #include "driver/i2c.h"
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
+#include "driver/uart.h"
 
 #include "nvs_flash.h"
 #include "mpu6050.h"
@@ -35,18 +36,180 @@
 #define PORT 3333
 #define HOST_IP_ADDR "192.168.0.110" // 192.168.43.32
 
+
+
+#define ECHO_UART_PORT_NUM      2
+#define ECHO_UART_BAUD_RATE     460800
+#define ECHO_TASK_STACK_SIZE    3072 
+
 char payload[128];
 
 int loopCounts;
 
-uint8_t crsfPacket[CRSF_PACKET_SIZE];
-uint8_t crsfCmdPacket[CRSF_CMD_PACKET_SIZE];
-int16_t rcChannels[CRSF_MAX_CHANNEL];
+uint8_t crsfPacket[CRSF_PACKET_SIZE] = {0};
+uint8_t crsfCmdPacket[CRSF_CMD_PACKET_SIZE] = {0};
+int16_t rcChannels[CRSF_MAX_CHANNEL] = {0};
 uint32_t crsfTime = 0;
 
-CRSF crsfclass;
+// CRSF crsfclass;
 
+#define UART_PIN UART_NUM_2
+#define RX_BUF_SIZE 1024
 
+#define RXD_PIN (GPIO_NUM_16)
+#define TXD_PIN (GPIO_NUM_17)
+
+QueueHandle_t uart_queue;
+
+void uart_init(){
+ uart_config_t uart_config = {
+        .baud_rate = ECHO_UART_BAUD_RATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+    uart_driver_install(UART_PIN, RX_BUF_SIZE * 3, RX_BUF_SIZE * 3, 10,  &uart_queue, 0);
+    ESP_ERROR_CHECK(uart_param_config(UART_PIN, &uart_config));
+    uart_set_pin(UART_PIN,  TXD_PIN, RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    uart_set_line_inverse(UART_PIN, UART_SIGNAL_TXD_INV);
+}
+
+int sendData(const char* logName,  const char* data){
+    const int len = strlen(data);
+    const int txBytes = uart_write_bytes(UART_PIN, data, len);
+    ESP_LOGI(logName,  "wrote %d bytes", txBytes);
+    return txBytes;
+}
+static void tx_task(void *arg){
+    
+    uint8_t tes[] = {
+        0xAA, 0xAA, 0x01, 0x01, 0xFF, 0xFF
+    };
+
+    uint8_t first[] = {
+        0xEA,
+        0x0D,
+        0x3A,
+        0xEA,
+        0xEE,
+        0x10,
+        0x00,
+        0x01,
+        0x04,
+        0x64,
+        0xFF,
+        0xFF,
+        0xFC,
+        0x18,
+        0xC4,
+        0xF0,
+    };
+
+    uint8_t second[] = {  
+        0xEE,
+        0x18,
+        0x16,
+        0xDC,
+        0xB3,
+        0x1F,
+        0x3D,
+        0xC0,
+        0x37,
+        0xF1,
+        0x56,
+        0xB4,
+        0xA2,
+        0x15,
+        0xE0,
+        0x03,
+        0x1F,
+        0xF8,
+        0xC0,
+        0x07,
+        0x3E,
+        0xF0,
+        0x81,
+        0x0F,
+        0x7C,
+        0x08,
+    };
+
+    uint8_t third[] = {
+        0xEA,
+        0x0C,
+        0x14,
+        0xFF,
+        0x00,
+        0x00,
+        0x0D,
+        0x00,
+        0x05,
+        0x07,
+        0xB1,
+        0x00,
+        0x0D,
+        0xD0,
+        0x80,
+    };
+    uint8_t null[1] = { 0};
+int count = 0;
+    while(1){
+        if(count <= 5){
+        uart_write_bytes(UART_PIN, tes, 6);
+        // uart_write_bytes(UART_PIN, first, sizeof(first)/sizeof(first[0]));
+        // uart_write_bytes(UART_PIN, null, 1);
+        printf("write first\n");
+        // count++;
+        
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+        }
+        if(count >  5){
+        printf("write second \n");
+        uart_write_bytes(UART_PIN, second, sizeof(second)/sizeof(second[0]));
+        // uart_write_bytes(UART_PIN, null, 1);
+        vTaskDelay(0.3 / portTICK_PERIOD_MS);
+        uart_write_bytes(UART_PIN, third, sizeof(third)/sizeof(third[0]));
+        printf("write third \n");
+        // uart_write_bytes(UART_PIN, null, 1);
+        vTaskDelay(3.5 / portTICK_PERIOD_MS);
+        // count++;
+        }
+        // TickType_t tx_start = xTaskGetTickCount();
+        // sendData("TX TASK", "hello world");
+        // TickType_t tx_end = xTaskGetTickCount();
+        // printf("TX TIME: %lu ticks \n", tx_end - tx_start);
+        // // printf("hello world\n");
+        // vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
+}
+static void rx_task(){
+    uint8_t* data = (uint8_t*) malloc(RX_BUF_SIZE +1);
+    while(1){
+    memset(data, 0, sizeof(data));
+
+    TickType_t tx_start = xTaskGetTickCount();
+    const int rxBytes = uart_read_bytes(UART_PIN, data, RX_BUF_SIZE *2,500 / portTICK_PERIOD_MS);
+    TickType_t tx_end = xTaskGetTickCount();
+    printf("RX TIME: %lu ticks \n", tx_end - tx_start);
+     
+    // printf("rx data %s is %d \n", data, rxBytes);
+    if(rxBytes > 0){
+        // ESP_LOGI("rx data", " %s is %d", data, rxBytes);
+        // int sz = sizeof(data) / sizeof(data[0]);
+        printf("RX %d: ", 16);
+        for(int i = 0; i < 16; i++){
+            printf("%02X, ", data[i]);
+        }
+        printf("\n");
+        // ESP_LOGI("RX_TASK", "read %d  bytes: %c", rxBytes, data);
+        // ESP_LOG_BUFFER_HEXDUMP("RX_TASK", data, rxBytes, ESP_LOG_INFO);
+    }
+    vTaskDelay(200 / portTICK_PERIOD_MS);
+    }
+    free(data);
+}
 
 void i2c_init() {
     i2c_config_t i2c_config = {
@@ -379,49 +542,117 @@ void start_process() {
         rcChannels[6] = mode_pwm;
         // sprintf(payload, "r%dp%dy%dm%d\n", roll_pwm, pitch_pwm, yaw_pwm, mode_pwm);
         // sprintf(payload, "r%dp%dt%dy%dm%da%dg%d", roll_pwm, pitch_pwm, throttle_pwm, yaw_pwm, mode_pwm, arming_pwm, magnet_pwm);
-        printf("r%dp%dt%dy%d\n", roll_pwm, pitch_pwm, throttle_pwm, yaw_pwm);
+        sprintf(payload, "r%dp%dt%dy%d\n", roll_pwm, pitch_pwm, throttle_pwm, yaw_pwm);
         // printf("%d\n", yaw_pwm);
 
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
-
-void elrs_task(void *pvParameters){
-    crsfclass.begin();
+void monitor_task(void *pvParameter){
     while(1){
+        printf("%s\n", payload);
+        vTaskDelay(500 / portTICK_PERIOD_MS);
+    }
+}
+void elrs_task(void *pvParameter){
+    // crsfclass.begin();
+        rcChannels[0] = 1200;
+        rcChannels[1] = 1500;
+        rcChannels[2] = 1100;
+        rcChannels[3] = 1600;
+        rcChannels[4]= 1800;
+        rcChannels[5] = 2000;
+        rcChannels[6] = 1500;
+
+        // uint8_t packet3[] = {0xC8, 0x04, 0x28, 0x00, 0xEA, 0x0x
+        // uint8_t packet3[] = {0xEE,  0x06  ,0x2D  ,0xEE  , 0xEA  , 0x01  ,0x02  ,0x4F};
+        // uint8_t packet[] = {0xC8, 0x04, 0x28, 0x00, 0xEA, 0x54};
+        // uint8_t packet2[] = {0xC8, 0x06, 0x2C, 0xEE, 0xEF, 0x10, 0x00, 0xCD};
+
+    // uint8_t packet2[6] = {};
+    //     for(int i = 0;i < 6; i++){
+    //         packet2[i] = ~packet[i];
+    //     }
+    while(1){
+        // for(int i = 0; i < 6; i++){
+        //     printf(" %02X ", packet[i]);
+        // }
+        // uart_write_bytes(UART_PIN, packet, 6);
+        // uart_write_bytes(UART_PIN, packet2, 8);
+        // uart_write_bytes(UART_PIN, packet2, 8);
+        // uart_write_bytes(UART_PIN, packet3, 8);
+        // printf("TX\n");
+        // const int rxBytes = uart_read_bytes(UART_PIN, data, RX_BUF_SIZE *2,500 / portTICK_PERIOD_MS);
+        
+        // crsf_prepare_cmd_packet(crsfCmdPacket, ELRS_PKT_RATE_COMMAND, SETTING_1_PktRate);
+        // printf("CMD PACKET :");
+        // for(int i = 0; i < 8; i++){
+        
+        //     printf(" %02X ", crsfCmdPacket[i]);
+        // }
+        // printf("\n DATA PACKET");
+        // crsf_prepare_data_packet(crsfPacket, rcChannels);
+        // for(int i = 0; i< 26; i++){
+        //     printf(" %02X ", crsfPacket[i]);
+        // }
+        // printf("\n");
+
+
+        // uint32_t currentMicros = micros();
+        // crsf_prepare_data_packet(crsfPacket, rcChannels);
+    //     printf("\n hello world\n");
+
     if(loopCounts <= 500){ //kirim 500 packet
-        crsfclass.crsfPrepareDataPacket(crsfPacket, rcChannels);
-        crsfclass.CrsfWritePacket(crsfPacket, CRSF_PACKET_SIZE);
+        crsf_prepare_data_packet(crsfPacket, rcChannels);
+        // crsfclass.CrsfWritePacket(crsfPacket, CRSF_PACKET_SIZE);
+        uart_write_bytes(UART_PIN, crsfPacket, CRSF_PACKET_SIZE);
+    //    printf("TX : ");
+    //     for(int i = 0; i < 26; i++){
+    //         printf("%02X ", crsfPacket[i]);
+    //     }
+    //     printf("\n");
+        // printf("%s\n", crsfPacket);
         loopCounts++;
     }
     if(loopCounts >500 && loopCounts <=505){
-        crsfclass.crsfPrepareCmdPacket(crsfCmdPacket, ELRS_PKT_RATE_COMMAND, SETTING_1_PktRate);
+        crsf_prepare_cmd_packet(crsfCmdPacket, ELRS_PKT_RATE_COMMAND, SETTING_1_PktRate);
         // buildElrsPacket(crsfCmdPacket,ELRS_WIFI_COMMAND,0x01);
-        crsfclass.CrsfWritePacket(crsfCmdPacket, CRSF_CMD_PACKET_SIZE);
+        // crsfclass.CrsfWritePacket(crsfCmdPacket, CRSF_CMD_PACKET_SIZE);
+        uart_write_bytes(UART_PIN, crsfPacket, CRSF_PACKET_SIZE);
+    loopCounts++;
     }
     if(loopCounts >505 && loopCounts <=510){
-        crsfclass.crsfPrepareCmdPacket(crsfCmdPacket, ELRS_POWER_COMMAND, SETTING_2_Power);
+        crsf_prepare_cmd_packet(crsfCmdPacket, ELRS_POWER_COMMAND, SETTING_2_Power);
         // buildElrsPacket(crsfCmdPacket,ELRS_WIFI_COMMAND,0x01);
-        crsfclass.CrsfWritePacket(crsfCmdPacket, CRSF_CMD_PACKET_SIZE);
+        // crsfclass.CrsfWritePacket(crsfCmdPacket, CRSF_CMD_PACKET_SIZE);
+        uart_write_bytes(UART_PIN, crsfPacket, CRSF_PACKET_SIZE);
+    loopCounts++;
     }
-    if(loopCounts > 510) loopCounts = 0;
-    
-    vTaskDelay(2/portTICK_PERIOD_MS);
+    if(loopCounts >= 510) loopCounts = 0;
+    //1.6ms
+    vTaskDelay(10 / portTICK_PERIOD_MS);
 
 
     }
 }
 
 void app_main(void) {
-    i2c_init();
+    uart_init();
+    // i2c_init();
+    // start_process();
+    // xTaskCreate(rx_task, "rx", 1024*2, NULL,  0, NULL);
+    xTaskCreate(tx_task, "tx", 1024*2, NULL, 3, NULL);
     // adc_init();
     // switch_init();
 
     // wifi_connection_sta();
+    // elrs_task();
 
-    start_process();
-    xTaskCreate(elrs_task, "elrs task",  4096, NULL, 2, NULL);
-    // vTaskDelay(1000 / portTICK_PERIOD_MS);
-    // xTaskCreate(start_process, "start_process", 4096, NULL, 5, NULL);
+    
+    // xTaskCreate(monitor_task, "monitor", 4096, NULL, 1, NULL);
+    // xTaskCreate(elrs_task, "elrs task",  4096, NULL, 2, NULL);
+    
+    // xTaskCreate(start_process, "start_process", 4096, NULL, 3, NULL);
+    // vTaskDelay(100 / portTICK_PERIOD_MS);
     // xTaskCreate(udp_client_task, "udp_cilent_task", 4096, NULL, 4, NULL);
 }

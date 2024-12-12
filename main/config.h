@@ -60,6 +60,8 @@
 // const int analogInPinRudder = A1;
 // const int VOLTAGE_READ_PIN = A0;
 
+
+
 // pins that used for the switch
 const int DIGITAL_PIN_SWITCH_ARM = 4;  // Arm switch
 const int DIGITAL_PIN_SWITCH_AUX2 = 3; //

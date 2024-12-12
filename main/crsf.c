@@ -1,55 +1,9 @@
-
-
-/*
- * This file is part of Simple TX
- *
- * Simple TX is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * Simple TX is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Cleanflight.  If not, see <http://www.gnu.org/licenses/>.
- */
-/*
- =======================================================================================================
- * CRSF protocol
- *
- * CRSF protocol uses a single wire half duplex uart connection.
- * The master sends one frame every 4ms and the slave replies between two frames from the master.
- *
- * 420000 baud
- * not inverted
- * 8 Bit
- * 1 Stop bit
- * Big endian
- * ELRS uses crossfire protocol at many different baud rates supported by EdgeTX i.e. 115k, 400k, 921k, 1.87M, 3.75M
- * 115000 bit/s = 14400 byte/s
- * 420000 bit/s = 46667 byte/s (including stop bit) = 21.43us per byte
- * Max frame size is 64 bytes
- * A 64 byte frame plus 1 sync byte can be transmitted in 1393 microseconds.
- *
- * CRSF_TIME_NEEDED_PER_FRAME_US is set conservatively at 1500 microseconds
- *
- * Every frame has the structure:
- * <Device address><Frame length><Type><Payload><CRC>
- *
- * Device address: (uint8_t)
- * Frame length:   length in  bytes including Type (uint8_t)
- * Type:           (uint8_t)
- * CRC:            (uint8_t)
- *
- */
-
 #include "crsf.h"
+#include <stdint.h>
 
-// crc implementation from CRSF protocol document rev7
-extern "C" static uint8_t crsf_crc8tab[256] = {
+
+// CRC implementation from CRSF protocol document rev7
+static const uint8_t crsf_crc8tab[256] = {
     0x00, 0xD5, 0x7F, 0xAA, 0xFE, 0x2B, 0x81, 0x54, 0x29, 0xFC, 0x56, 0x83, 0xD7, 0x02, 0xA8, 0x7D,
     0x52, 0x87, 0x2D, 0xF8, 0xAC, 0x79, 0xD3, 0x06, 0x7B, 0xAE, 0x04, 0xD1, 0x85, 0x50, 0xFA, 0x2F,
     0xA4, 0x71, 0xDB, 0x0E, 0x5A, 0x8F, 0x25, 0xF0, 0x8D, 0x58, 0xF2, 0x27, 0x73, 0xA6, 0x0C, 0xD9,
@@ -65,31 +19,27 @@ extern "C" static uint8_t crsf_crc8tab[256] = {
     0x72, 0xA7, 0x0D, 0xD8, 0x8C, 0x59, 0xF3, 0x26, 0x5B, 0x8E, 0x24, 0xF1, 0xA5, 0x70, 0xDA, 0x0F,
     0x20, 0xF5, 0x5F, 0x8A, 0xDE, 0x0B, 0xA1, 0x74, 0x09, 0xDC, 0x76, 0xA3, 0xF7, 0x22, 0x88, 0x5D,
     0xD6, 0x03, 0xA9, 0x7C, 0x28, 0xFD, 0x57, 0x82, 0xFF, 0x2A, 0x80, 0x55, 0x01, 0xD4, 0x7E, 0xAB,
-    0x84, 0x51, 0xFB, 0x2E, 0x7A, 0xAF, 0x05, 0xD0, 0xAD, 0x78, 0xD2, 0x07, 0x53, 0x86, 0x2C, 0xF9};
+    0x84, 0x51, 0xFB, 0x2E, 0x7A, 0xAF, 0x05, 0xD0, 0xAD, 0x78, 0xD2, 0x07, 0x53, 0x86, 0x2C, 0xF9
+};
 
-extern "C" uint8_t crsf_crc8(const uint8_t *ptr, uint8_t len) {
+// CRC8 calculation function
+uint8_t crsf_crc8(const uint8_t *ptr, uint8_t len) {
     uint8_t crc = 0;
-    for (uint8_t i = 0; i < len; i++){
+    for (uint8_t i = 0; i < len; i++) {
         crc = crsf_crc8tab[crc ^ *ptr++];
     }
     return crc;
 }
 
-// Serial begin
-extern "C" void CRSF::begin() {
-    port.begin(SERIAL_BAUDRATE);
+// Serial begin function
+void crsf_begin() {
+    // Implementation left for you to fill in based on your UART initialization
+    // port.begin(SERIAL_BAUDRATE);
 }
 
-// prepare data packet
-extern "C" void CRSF::crsfPrepareDataPacket(uint8_t packet[], int16_t channels[]) {
-
-    // const uint8_t crc = crsf_crc8(&packet[2], CRSF_PACKET_SIZE-3);
-    /*
-     * Map 1000-2000 with middle at 1500 chanel values to
-     * 173-1811 with middle at 992 S.BUS protocol requires
-    */
-
-    // packet[0] = UART_SYNC; //Header
+// Prepare data packet
+void crsf_prepare_data_packet(uint8_t packet[], int16_t channels[]) {
+    // printf("hehe");
     packet[0] = ELRS_ADDRESS; // Header
     packet[1] = 24;           // length of type (24) + payload + crc
     packet[2] = TYPE_CHANNELS;
@@ -115,12 +65,12 @@ extern "C" void CRSF::crsfPrepareDataPacket(uint8_t packet[], int16_t channels[]
     packet[22] = (uint8_t)((channels[13] & 0x07FF) >> 9 | (channels[14] & 0x07FF) << 2);
     packet[23] = (uint8_t)((channels[14] & 0x07FF) >> 6 | (channels[15] & 0x07FF) << 5);
     packet[24] = (uint8_t)((channels[15] & 0x07FF) >> 3);
-
+    // packet[25] = (uint8_t) 2;
     packet[25] = crsf_crc8(&packet[2], packet[1] - 1); // CRC
 }
 
-// prepare elrs setup packet (power, packet rate...)
-extern "C" void CRSF::crsfPrepareCmdPacket(uint8_t packetCmd[], uint8_t command, uint8_t value) {
+// Prepare ELRS setup packet (power, packet rate...)
+void crsf_prepare_cmd_packet(uint8_t packetCmd[], uint8_t command, uint8_t value) {
     packetCmd[0] = ELRS_ADDRESS;
     packetCmd[1] = 6; // length of Command (4) + payload + crc
     packetCmd[2] = TYPE_SETTINGS_WRITE;
@@ -131,6 +81,8 @@ extern "C" void CRSF::crsfPrepareCmdPacket(uint8_t packetCmd[], uint8_t command,
     packetCmd[7] = crsf_crc8(&packetCmd[2], packetCmd[1] - 1); // CRC
 }
 
-extern "C" void CRSF::CrsfWritePacket(uint8_t packet[], uint8_t packetLength) {
-    port.write(packet, packetLength);
-}
+// Write packet function
+// void crsf_write_packet(uint8_t packet[], uint8_t packetLength) {
+    // uart_write_bytes(/* You'll need to pass appropriate UART parameters here */);
+    // Equivalent of port.write(packet, packetLength) in your UART implementation
+// }

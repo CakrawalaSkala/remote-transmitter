@@ -21,8 +21,10 @@
 		"ostream": "c",
 		"regex": "c",
 		"xlocale": "c",
-		"cstdint": "cpp"
+		"cstdint": "cpp",
+		"span": "c",
+		"type_traits": "c"
 	},
-	"idf.portWin": "COM3",
+	"idf.portWin": "COM36",
 	"idf.flashType": "UART"
 }

@@ -1,3 +1,2 @@
 dependencies:
-  espressif/esp-dsp: "*"
   espressif/mpu6050: "^1.2.0"

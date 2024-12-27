@@ -27,6 +27,14 @@ void imu_substract(struct imu_data *a, struct imu_data b) {
     a->z -= b.z;
 }
 
+struct imu_data imu_substract_return(struct imu_data a, struct imu_data b) {
+    a.x -= b.x;
+    a.y -= b.y;
+    a.z -= b.z;
+
+    return a;
+}
+
 void imu_multiply_single(struct imu_data *a, float b) {
     a->x *= b;
     a->y *= b;
@@ -103,10 +111,24 @@ esp_err_t imu_read_raw(mpu6050_handle_t mpu6050, struct imu_data *gyro, struct i
 }
 
 mpu6050_handle_t imu_init(i2c_port_t port, const uint16_t dev_addr) {
+    printf("WAKING UP %d\n", dev_addr);
     mpu6050_handle_t mpu6050 = mpu6050_create(port, dev_addr);
 
-    mpu6050_wake_up(mpu6050);
-    mpu6050_config(mpu6050, ACCE_FS_2G, GYRO_FS_250DPS);
+    if (mpu6050 == NULL) {
+        printf("Failed to initialize\n");
+    }
+
+    esp_err_t err = mpu6050_wake_up(mpu6050);
+    if (err != ESP_OK) {
+        printf("Failed to wake IMU, %d\n", dev_addr);
+    }
+
+    err = mpu6050_config(mpu6050, ACCE_FS_2G, GYRO_FS_250DPS);
+    if (err != ESP_OK) {
+        printf("Failed to config IMU, %d\n", dev_addr);
+    }
+
+    vTaskDelay(10 / portTICK_PERIOD_MS);
 
     return mpu6050;
 }

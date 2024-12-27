@@ -24,6 +24,7 @@ struct full_imu_data {
 // IMU operator
 void imu_add(struct imu_data *a, struct imu_data b);
 void imu_substract(struct imu_data *a, struct imu_data b);
+struct imu_data imu_substract_return(struct imu_data a, struct imu_data b);
 void imu_multiply_single(struct imu_data *a, float b);
 struct imu_data imu_multiply_single_return(struct imu_data a, float b);
 void imu_multiply(struct imu_data *a, struct imu_data b);

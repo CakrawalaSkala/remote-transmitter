@@ -1,7 +1,5 @@
 #include <math.h>
-#include <string.h>
 #include "filters.h"
-#include "dsps_math.h"
 
 // Quaternion operations
 void quaternion_normalize(float q[4]) {
@@ -48,12 +46,12 @@ static const struct kalman_config default_kalman_config = {
     .R_measure = 0.03f
 };
 
-struct mahony_filter *create_mahony_filter(const struct mahony_config *config) {
-    struct mahony_filter *filter = malloc(sizeof(struct mahony_filter));
-    if (filter) {
-        filter->config = config ? config : &default_mahony_config;
-        memset(&filter->state, 0, sizeof(struct mahony_state));
-    }
+struct mahony_filter create_mahony_filter(const struct mahony_config *config) {
+    struct mahony_filter filter;
+    filter.config = config ? config : &default_mahony_config;
+    filter.state.integral.x = 0.0f;
+    filter.state.integral.y = 0.0f;
+    filter.state.integral.z = 0.0f;
     return filter;
 }
 
@@ -63,17 +61,20 @@ static void kalman_init(struct kalman_state *state, const struct kalman_config *
     state->bias = 0.0f;
 
     // Initialize error covariance matrix
-    memset(state->P, 0, sizeof(state->P));
+    state->P[0][0] = 0.0f;
+    state->P[0][1] = 0.0f;
+    state->P[1][0] = 0.0f;
+    state->P[1][1] = 0.0f;
 }
 
-struct kalman_filter *create_kalman_filter(const struct kalman_config *config) {
-    struct kalman_filter *filter = malloc(sizeof(struct kalman_filter));
-    if (filter) {
-        filter->config = config ? config : &default_kalman_config;
-        for (int i = 0; i < 3; i++) {
-            kalman_init(&filter->states[i], filter->config);
-        }
+struct kalman_filter create_kalman_filter(const struct kalman_config *config) {
+    struct kalman_filter filter;
+
+    filter.config = config ? config : &default_kalman_config;
+    for (int i = 0; i < 3; i++) {
+        kalman_init(&filter.states[i], filter.config);
     }
+
     return filter;
 }
 

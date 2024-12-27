@@ -1,5 +1,4 @@
 #include "modules/imu.h"
-#include "dsps_math.h"
 
 // Filter configurations (constants)
 struct mahony_config {
@@ -38,8 +37,8 @@ struct kalman_filter {
 };
 
 // Factory functions
-struct mahony_filter *create_mahony_filter(const struct mahony_config *config);
-struct kalman_filter *create_kalman_filter(const struct kalman_config *config);
+struct mahony_filter create_mahony_filter(const struct mahony_config *config);
+struct kalman_filter create_kalman_filter(const struct kalman_config *config);
 // Quaternion operations
 void quaternion_normalize(float q[4]);
 void quaternion_update(float q[4], struct imu_data gyro, float delta_t);

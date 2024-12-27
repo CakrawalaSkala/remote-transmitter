@@ -96,6 +96,8 @@ void create_model_switch_packet(uint8_t id, uint8_t *packet) {
     // if (current_id == id) return;
     // current_id = id;
 
+    ESP_LOGI(TAG, "switching to id %d", id);
+
     packet[0] = DEVICE_ADDRESS_FLIGHT_CONTROLLER;
     packet[1] = 8;
     packet[2] = FRAME_TYPE_DIRECT_COMMANDS;

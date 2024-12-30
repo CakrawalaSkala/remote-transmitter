@@ -30,6 +30,9 @@
 //TIMER
 #define INTERVALMS 3 * 1000 // in microseconds
 
+static bool left_calibrated = 0;
+static bool right_calibrated = 0;
+
 static void timer_callback(void *arg);
 static bool should_transmit = 0;
 static bool should_switch = 1;
@@ -64,10 +67,10 @@ struct imu_data left_imu_offset = { 0 };
 struct imu_data right_imu_offset = { 0 };
 
 void  switch_cb() {
-    yaw_lock = !yaw_lock;
-    // should_switch = 1;
-    // current_id = current_id < 2 ? current_id + 1 : 1;
-    // ESP_LOGI("gpio", "should switch %d", current_id);
+    // yaw_lock = !yaw_lock;
+    should_switch = 1;
+    current_id = current_id < 2 ? current_id + 1 : 1;
+    ESP_LOGI("gpio", "should switch %d", current_id);
 }
 
 void reset_cb() {
@@ -89,7 +92,7 @@ void gpio_init() {
 
     // arming_button
     button_add_cb(&arming_button, BUTTON_CLICK_MEDIUM, AUX1_cb, NULL);
-    button_add_cb(&arming_button, BUTTON_CLICK_LONG, AUX1_cb, NULL);
+    button_add_cb(&arming_button, BUTTON_CLICK_LONG, reset_cb, NULL);
     button_add_cb(&arming_button, BUTTON_CLICK_SINGLE, AUX1_cb, NULL);
 
     // mekanisme_button
@@ -100,9 +103,9 @@ void gpio_init() {
     button_add_cb(&mekanisme_button, BUTTON_CLICK_LONG, switch_cb, NULL);
 
     // reset_button
-    button_add_cb(&reset_button, BUTTON_CLICK_SINGLE, reset_cb, NULL);
-    button_add_cb(&reset_button, BUTTON_CLICK_LONG, reset_cb, NULL);
-    button_add_cb(&reset_button, BUTTON_CLICK_MEDIUM, reset_cb, NULL);
+    // button_add_cb(&reset_button, BUTTON_CLICK_SINGLE, reset_cb, NULL);
+    // button_add_cb(&reset_button, BUTTON_CLICK_LONG, reset_cb, NULL);
+    // button_add_cb(&reset_button, BUTTON_CLICK_MEDIUM, reset_cb, NULL);
 }
 
 void timer_init() {
@@ -181,19 +184,21 @@ void left_imu_task() {
         imu_add(&left_imu_data.offset, left_imu_data.gyro);
     }
     imu_divide_single(&left_imu_data.offset, 2000);
+    left_calibrated = 1;
     ESP_LOGI(TAG, "Left Gyro calibration done!");
 
     struct mahony_filter mahony = create_mahony_filter(NULL);
 
     while (true) {
+        if(!imu_read(imu, &left_imu_data)) continue;
+        
         left_n++;
-        imu_read(imu, &left_imu_data);
         // Do filtering
         apply_mahony_filter(&mahony, &left_imu_data.gyro, &left_imu_data.acce,
             left_imu_data.delta_t, left_imu_data.q);
         imu_process(&left_imu_data);
 
-        imu_add(&left_imu_data.processed, left_imu_offset);
+        applyDeadzone(&left_imu_data.processed.y, right_imu_offset.y, 10);
 
         /*Mapping degree to PWM*/
         if (left_n > 1) {
@@ -226,19 +231,21 @@ void right_imu_task() {
     }
     imu_divide_single(&right_imu_data.offset, 2000);
     ESP_LOGI(TAG, "Right Gyro calibration done!");
+    right_calibrated = 1;
 
     struct mahony_filter mahony = create_mahony_filter(NULL);
 
     while (true) {
+        if(!imu_read(imu, &right_imu_data)) continue;
+
         right_n++;
-        imu_read(imu, &right_imu_data);
         // Do filtering
         apply_mahony_filter(&mahony, &right_imu_data.gyro, &right_imu_data.acce,
             right_imu_data.delta_t, right_imu_data.q);
         imu_process(&right_imu_data);
 
-        applyDeadzone(&right_imu_data.processed.y, 0, 10);
-        applyDeadzone(&right_imu_data.processed.x, 0, 10);
+        applyDeadzone(&right_imu_data.processed.y, right_imu_offset.y, 10);
+        applyDeadzone(&right_imu_data.processed.x, right_imu_offset.x, 10);
 
         /*Mapping degree to PWM*/
         if (right_n > 1) {
@@ -266,15 +273,15 @@ void elrs_task(void *pvParameters) {
             elrs_send_data(UART_NUM, packet, MODEL_SWITCH_PACKET_LENGTH);
             should_switch = 0;
         }
-        if (should_transmit) {
+        if (should_transmit && left_calibrated && right_calibrated) {
             should_transmit = false;
             create_crsf_channels_packet(channels, packet);
             elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
+            printf("r%dp%dt%dy%d\n", channels[ROLL], channels[PITCH], channels[THROTTLE], channels[YAW]);
             left_n = 0;
             right_n = 0;
         }
 
-        printf("r%dp%dt%dy%d\n", channels[ROLL], channels[PITCH], channels[THROTTLE], channels[YAW]);
         vTaskDelay(1 / portTICK_PERIOD_MS); // ojo diganti
     }
 }

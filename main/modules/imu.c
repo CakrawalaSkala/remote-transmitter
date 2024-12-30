@@ -11,8 +11,8 @@ static const float RAD_TO_DEG = 57.2958;
 static const float DEG_TO_RAD = 0.0174533;
 static const float gyro_constant = 250.0 / 32768.0;
 
-static struct imu_data A_offset1 = { 265.0, -80.0, -700.0 };
-static struct imu_data A_offset2 = { 0.994, 1.000, 1.014 };
+static struct imu_data A_offset1 = { 265.0f, -80.0f, -700.0f };
+static struct imu_data A_offset2 = { 0.994f, 1.000f, 1.014f };
 
 // IMU operator
 void imu_add(struct imu_data *a, struct imu_data b) {
@@ -85,7 +85,6 @@ esp_err_t imu_read_raw(mpu6050_handle_t mpu6050, struct imu_data *gyro, struct i
     /* Read Gyro Data */
     err = mpu6050_get_raw_gyro(mpu6050, &gyro_data);
     if (err != ESP_OK) {
-        /* code */
         printf("Failed to get gyro data\n");
         return err;
     }
@@ -93,7 +92,6 @@ esp_err_t imu_read_raw(mpu6050_handle_t mpu6050, struct imu_data *gyro, struct i
     /* Read Acce Data */
     err = mpu6050_get_raw_acce(mpu6050, &acce_data);
     if (err != ESP_OK) {
-        /* code */
         printf("Failed to get acce data\n");
         return err;
     }
@@ -133,11 +131,11 @@ mpu6050_handle_t imu_init(i2c_port_t port, const uint16_t dev_addr) {
     return mpu6050;
 }
 
-void imu_read(mpu6050_handle_t mpu6050, struct full_imu_data *data) {
+bool imu_read(mpu6050_handle_t mpu6050, struct full_imu_data *data) {
     esp_err_t err = imu_read_raw(mpu6050, &data->gyro, &data->acce);
     if (err != ESP_OK) {
-        printf("Failed to read IMU data\n");
-        return;
+        // printf("Failed to read IMU data\n");
+        return false;
     }
 
     // Apply offsets and scaling
@@ -150,6 +148,8 @@ void imu_read(mpu6050_handle_t mpu6050, struct full_imu_data *data) {
     data->now = esp_timer_get_time();
     data->delta_t = (data->now - data->last) * 0.000001;
     data->last = data->now;
+
+    return true;
 }
 
 void imu_process(struct full_imu_data *data) {

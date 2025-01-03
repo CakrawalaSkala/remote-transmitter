@@ -41,9 +41,9 @@ static const struct mahony_config default_mahony_config = {
 };
 
 static const struct kalman_config default_kalman_config = {
-    .Q_angle = 0.001f,
-    .Q_bias = 0.003f,
-    .R_measure = 0.03f
+.Q_angle = 0.01f,
+.Q_bias = 0.005f,
+.R_measure = 0.02f
 };
 
 struct mahony_filter create_mahony_filter(const struct mahony_config *config) {

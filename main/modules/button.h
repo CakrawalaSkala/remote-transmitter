@@ -33,9 +33,11 @@
   ******************************************************************************
   */
 
-#define CONFIG_BUTTON_DEBOUNCE_SHORT_TIME 30
-#define CONFIG_BUTTON_DEBOUNCE_MEDIUM_TIME 100
-#define CONFIG_BUTTON_DEBOUNCE_LONG_TIME 200
+#define DEBUG 1
+
+#define CONFIG_BUTTON_DEBOUNCE_SHORT_TIME 100
+#define CONFIG_BUTTON_DEBOUNCE_MEDIUM_TIME 300
+#define CONFIG_BUTTON_DEBOUNCE_LONG_TIME 800
 
 
 /* Define to prevent recursive inclusion -------------------------------------*/

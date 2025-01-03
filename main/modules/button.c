@@ -48,7 +48,7 @@
 #define BUTTON_LONG_PRESS_BIT					BIT2
 #define BUTTON_DOUBLE_CLICK_PRESS_BIT	BIT3
 
-#define ENABLE_LOG
+// #define ENABLE_LOG
 
 /* Private function prototypes -----------------------------------------------*/
 static void IRAM_ATTR isr_handler(void *arg);
@@ -265,7 +265,7 @@ static void IRAM_ATTR isr_handler(void *arg) {
 #ifdef ENABLE_LOG
 					ESP_DRAM_LOGI(TAG, "button %d bounce", button->gpio);
 #endif
-					xTimerStartFromISR(button->debounce_timer, NULL);
+					// xTimerStartFromISR(button->debounce_timer, NULL);
 					break;
 				}
 

@@ -37,7 +37,7 @@ static void timer_callback(void *arg);
 static bool should_transmit = 0;
 static bool should_switch = 1;
 static bool yaw_lock = 0;
-int8_t current_id = 1;
+int8_t current_id = 2;
 // IMU
 uint16_t channels[16] = { 0 };
 
@@ -47,7 +47,7 @@ TOGGLE_CHANNEL_CB(AUX3);
 
 button_t arming_button;
 button_t mekanisme_button;
-button_t reset_button;
+button_t switch_button;
 
 #define ROLL_CENTER 0
 #define PITCH_CENTER 0
@@ -69,11 +69,12 @@ struct imu_data right_imu_offset = { 0 };
 void  switch_cb() {
     // yaw_lock = !yaw_lock;
     should_switch = 1;
-    current_id = current_id < 2 ? current_id + 1 : 1;
-    ESP_LOGI("gpio", "should switch %d", current_id);
+    current_id = current_id < 2 ? current_id + 1 : 0;
+    ESP_DRAM_LOGI("gpio", "current_id %d", current_id);
 }
 
 void reset_cb() {
+    ESP_LOGI("gpio", "reset_cb");
     left_imu_offset = imu_substract_return(left_imu_data.processed, left_imu_center);
     right_imu_offset = imu_substract_return(right_imu_data.processed, right_imu_center);
 }
@@ -85,22 +86,34 @@ void gpio_init() {
         tskIDLE_PRIORITY + 10,            /* Button FreeRTOS task priority */
         configMINIMAL_STACK_SIZE * 4));   /* Button FreeRTOS task stack size */
     ESP_ERROR_CHECK(button_init(&mekanisme_button, /* Button instance */
-        GPIO_NUM_12,                       /* Button GPIO number */
+        GPIO_NUM_27,                       /* Button GPIO number */
         BUTTON_EDGE_FALLING,
         tskIDLE_PRIORITY + 10,            /* Button FreeRTOS task priority */
         configMINIMAL_STACK_SIZE * 4));   /* Button FreeRTOS task stack size */
 
+    ESP_ERROR_CHECK(button_init(&switch_button, /* Button instance */
+        GPIO_NUM_14,                       /* Button GPIO number */
+        BUTTON_EDGE_FALLING,
+        tskIDLE_PRIORITY + 10,            /* Button FreeRTOS task priority */
+        configMINIMAL_STACK_SIZE * 4));   /* Button FreeRTOS task stack size */
+    
     // arming_button
+    button_add_cb(&arming_button, BUTTON_CLICK_LONG, AUX1_cb, NULL);
+
     button_add_cb(&arming_button, BUTTON_CLICK_MEDIUM, AUX1_cb, NULL);
-    button_add_cb(&arming_button, BUTTON_CLICK_LONG, reset_cb, NULL);
-    button_add_cb(&arming_button, BUTTON_CLICK_SINGLE, AUX1_cb, NULL);
+    // button_add_cb(&arming_button, BUTTON_CLICK_LONG, AUX1_cb, NULL);
+    // button_add_cb(&arming_button, BUTTON_CLICK_SINGLE, AUX1_cb, NULL);
 
     // mekanisme_button
-    button_add_cb(&mekanisme_button, BUTTON_CLICK_SINGLE, AUX2_cb, NULL);
+    // button_add_cb(&mekanisme_button, BUTTON_CLICK_SINGLE, AUX2_cb, NULL);
     button_add_cb(&mekanisme_button, BUTTON_CLICK_MEDIUM, AUX2_cb, NULL);
+    button_add_cb(&mekanisme_button, BUTTON_CLICK_LONG, switch_cb, NULL);
+
 
     // switch id
-    button_add_cb(&mekanisme_button, BUTTON_CLICK_LONG, switch_cb, NULL);
+    button_add_cb(&switch_button, BUTTON_CLICK_LONG, switch_cb, NULL);
+    button_add_cb(&switch_button, BUTTON_CLICK_MEDIUM, switch_cb, NULL);
+
 
     // reset_button
     // button_add_cb(&reset_button, BUTTON_CLICK_SINGLE, reset_cb, NULL);
@@ -187,18 +200,20 @@ void left_imu_task() {
     left_calibrated = 1;
     ESP_LOGI(TAG, "Left Gyro calibration done!");
 
-    struct mahony_filter mahony = create_mahony_filter(NULL);
+    struct kalman_filter mahony = create_kalman_filter(NULL);
 
     while (true) {
         if(!imu_read(imu, &left_imu_data)) continue;
         
         left_n++;
         // Do filtering
-        apply_mahony_filter(&mahony, &left_imu_data.gyro, &left_imu_data.acce,
+        apply_kalman_filter(&mahony, &left_imu_data.gyro, &left_imu_data.acce,
             left_imu_data.delta_t, left_imu_data.q);
         imu_process(&left_imu_data);
+    
+        imu_add(&left_imu_data.processed, left_imu_offset);
+        applyDeadzone(&left_imu_data.processed.y, 0, 10);
 
-        applyDeadzone(&left_imu_data.processed.y, right_imu_offset.y, 10);
 
         /*Mapping degree to PWM*/
         if (left_n > 1) {
@@ -233,14 +248,14 @@ void right_imu_task() {
     ESP_LOGI(TAG, "Right Gyro calibration done!");
     right_calibrated = 1;
 
-    struct mahony_filter mahony = create_mahony_filter(NULL);
+    struct kalman_filter kalman = create_kalman_filter(NULL);
 
     while (true) {
         if(!imu_read(imu, &right_imu_data)) continue;
 
         right_n++;
         // Do filtering
-        apply_mahony_filter(&mahony, &right_imu_data.gyro, &right_imu_data.acce,
+        apply_kalman_filter(&kalman, &right_imu_data.gyro, &right_imu_data.acce,
             right_imu_data.delta_t, right_imu_data.q);
         imu_process(&right_imu_data);
 
@@ -282,6 +297,7 @@ void elrs_task(void *pvParameters) {
             right_n = 0;
         }
 
+        // printf("r%dp%dt%dy%d\n", channels[ROLL], channels[PITCH], channels[THROTTLE], channels[YAW]);
         vTaskDelay(1 / portTICK_PERIOD_MS); // ojo diganti
     }
 }

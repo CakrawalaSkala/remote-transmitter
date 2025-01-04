@@ -200,14 +200,14 @@ void left_imu_task() {
     left_calibrated = 1;
     ESP_LOGI(TAG, "Left Gyro calibration done!");
 
-    struct kalman_filter mahony = create_kalman_filter(NULL);
+    struct mahony_filter mahony = create_mahony_filter(NULL);
 
     while (true) {
         if(!imu_read(imu, &left_imu_data)) continue;
         
         left_n++;
         // Do filtering
-        apply_kalman_filter(&mahony, &left_imu_data.gyro, &left_imu_data.acce,
+        apply_mahony_filter(&mahony, &left_imu_data.gyro, &left_imu_data.acce,
             left_imu_data.delta_t, left_imu_data.q);
         imu_process(&left_imu_data);
     
@@ -248,14 +248,14 @@ void right_imu_task() {
     ESP_LOGI(TAG, "Right Gyro calibration done!");
     right_calibrated = 1;
 
-    struct kalman_filter kalman = create_kalman_filter(NULL);
+    struct mahony_filter mahony = create_mahony_filter(NULL);
 
     while (true) {
         if(!imu_read(imu, &right_imu_data)) continue;
 
         right_n++;
         // Do filtering
-        apply_kalman_filter(&kalman, &right_imu_data.gyro, &right_imu_data.acce,
+        apply_mahony_filter(&mahony, &right_imu_data.gyro, &right_imu_data.acce,
             right_imu_data.delta_t, right_imu_data.q);
         imu_process(&right_imu_data);
 
@@ -292,12 +292,11 @@ void elrs_task(void *pvParameters) {
             should_transmit = false;
             create_crsf_channels_packet(channels, packet);
             elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
-            printf("r%dp%dt%dy%d\n", channels[ROLL], channels[PITCH], channels[THROTTLE], channels[YAW]);
+            printf("r%dp%dt%dy%d arming %d, failsafe %d, id %d\n", channels[ROLL], channels[PITCH], channels[THROTTLE], channels[YAW], channels[AUX1], channels[AUX2], current_id);
             left_n = 0;
             right_n = 0;
         }
 
-        // printf("r%dp%dt%dy%d\n", channels[ROLL], channels[PITCH], channels[THROTTLE], channels[YAW]);
         vTaskDelay(1 / portTICK_PERIOD_MS); // ojo diganti
     }
 }

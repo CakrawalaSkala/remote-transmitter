@@ -9,9 +9,15 @@ struct imu_data {
     float z; // yaw
 };
 
+struct reading_entry {
+    float delta_t;
+    struct imu_data data;
+};
+
 struct full_imu_data {
     struct imu_data offset;
     float now, last, delta_t;
+    struct reading_entry last_read;
 
     struct imu_data acce;
     struct imu_data gyro;

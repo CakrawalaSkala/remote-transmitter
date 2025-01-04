@@ -37,7 +37,7 @@ static void timer_callback(void *arg);
 static bool should_transmit = 0;
 static bool should_switch = 1;
 static bool yaw_lock = 0;
-int8_t current_id = 2;
+int8_t current_id = 0;
 // IMU
 uint16_t channels[16] = { 0 };
 
@@ -188,7 +188,7 @@ void i2c_init() {
 void left_imu_task() {
     left_imu_data = create_full_imu_data();
     // Initialize MPU6050
-    mpu6050_handle_t imu = imu_init(I2C_NUM_0, MPU6050_I2C_ADDRESS_1);
+    mpu6050_handle_t imu = imu_init(I2C_NUM_0, MPU6050_I2C_ADDRESS);
 
     /*Calibrate Gyro*/
     for (int i = 0; i < 2000; i++) {
@@ -217,11 +217,11 @@ void left_imu_task() {
 
         /*Mapping degree to PWM*/
         if (left_n > 1) {
-            channels[THROTTLE] = (left_n - 1) / left_n * channels[THROTTLE] + 1 / left_n * mapValue(left_imu_data.processed.x - left_imu_offset.x, -45, 45, 0, MAX_CHANNEL_VALUE);
-            channels[YAW] = (left_n - 1) / left_n * channels[YAW] + 1 / left_n * mapValue(left_imu_data.processed.y - left_imu_offset.y, -45, 45, 0, MAX_CHANNEL_VALUE);
+            channels[THROTTLE] = (left_n - 1) / left_n * channels[THROTTLE] + 1 / left_n * mapValue(left_imu_data.processed.x - left_imu_offset.x, -45, 45, MAX_CHANNEL_VALUE, 0);
+            channels[YAW] = (left_n - 1) / left_n * channels[YAW] + 1 / left_n * mapValue(left_imu_data.processed.y - left_imu_offset.y, -45, 45, MAX_CHANNEL_VALUE, 0);
         } else {
-            channels[THROTTLE] = mapValue(left_imu_data.processed.x - left_imu_offset.x, -45, 45, 0, MAX_CHANNEL_VALUE);
-            channels[YAW] = mapValue(left_imu_data.processed.y - left_imu_offset.y, -45, 45, 0, MAX_CHANNEL_VALUE);
+            channels[THROTTLE] = mapValue(left_imu_data.processed.x - left_imu_offset.x, -45, 45, MAX_CHANNEL_VALUE, 0);
+            channels[YAW] = mapValue(left_imu_data.processed.y - left_imu_offset.y, -45, 45, MAX_CHANNEL_VALUE, 0);
         }
         if(yaw_lock && channels[AUX1] == MAX_CHANNEL_VALUE) channels[YAW] = MAX_CHANNEL_VALUE / 2;
         // printf("-");
@@ -236,7 +236,7 @@ void left_imu_task() {
 void right_imu_task() {
     right_imu_data = create_full_imu_data();
     // Initialize MPU6050
-    mpu6050_handle_t imu = imu_init(I2C_NUM_0, MPU6050_I2C_ADDRESS);
+    mpu6050_handle_t imu = imu_init(I2C_NUM_0, MPU6050_I2C_ADDRESS_1);
 
     /*Calibrate Gyro*/
     for (int i = 0; i < 2000; i++) {
@@ -249,6 +249,7 @@ void right_imu_task() {
     right_calibrated = 1;
 
     struct mahony_filter mahony = create_mahony_filter(NULL);
+
 
     while (true) {
         if(!imu_read(imu, &right_imu_data)) continue;
@@ -264,11 +265,11 @@ void right_imu_task() {
 
         /*Mapping degree to PWM*/
         if (right_n > 1) {
-            channels[ROLL] = (right_n - 1) / right_n * channels[ROLL] + 1 / right_n * mapValue(left_imu_data.processed.y - left_imu_offset.y, -45, 45, 0, MAX_CHANNEL_VALUE);
-            channels[PITCH] = (right_n - 1) / right_n * channels[PITCH] + 1 / right_n * mapValue(left_imu_data.processed.x - left_imu_offset.x, -45, 45, 0, MAX_CHANNEL_VALUE);
+            channels[ROLL] = (right_n - 1) / right_n * channels[ROLL] + 1 / right_n * mapValue(left_imu_data.processed.y - left_imu_offset.y, -45, 45, MAX_CHANNEL_VALUE, 0);
+            channels[PITCH] = (right_n - 1) / right_n * channels[PITCH] + 1 / right_n * mapValue(left_imu_data.processed.x - left_imu_offset.x, -45, 45, MAX_CHANNEL_VALUE, 0);
         } else {
-            channels[ROLL] = mapValue(right_imu_data.processed.y - right_imu_offset.y, -45, 45, 0, MAX_CHANNEL_VALUE);
-            channels[PITCH] = mapValue(right_imu_data.processed.x - right_imu_offset.x, -45, 45, 0, MAX_CHANNEL_VALUE);
+            channels[ROLL] = mapValue(right_imu_data.processed.y - right_imu_offset.y, -45, 45, MAX_CHANNEL_VALUE, 0);
+            channels[PITCH] = mapValue(right_imu_data.processed.x - right_imu_offset.x, -45, 45, MAX_CHANNEL_VALUE, 0);
         }
         // printf("+");
 

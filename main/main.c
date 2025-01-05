@@ -363,20 +363,23 @@ void elrs_task(void *pvParameters) {
         if (should_transmit && left_calibrated && right_calibrated) {
             should_transmit = false;
             create_crsf_channels_packet(channels, packet);
-            gpio_set_direction(TX_PIN, GPIO_MODE_OUTPUT);
-            gpio_set_pull_mode(TX_PIN, GPIO_PULLUP_ONLY);
+            // gpio_set_direction(TX_PIN, GPIO_MODE_OUTPUT);
+            // gpio_set_pull_mode(TX_PIN, GPIO_PULLUP_ONLY);
             tx_in_use = 1;
-
             elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
+
+            // gpio_set_direction(TX_PIN, GPIO_MODE_INPUT);
+            // gpio_set_pull_mode(TX_PIN, GPIO_FLOATING);
+            // tx_in_use = 0;
+
             // handle_read_crsf_attitude();
-            tx_in_use = 0;
+            // tx_in_use = ;
 
 
-            // printf("r%dp%dt%dy%d arming %d, failsafe %d, id %d\n", channels[ROLL], channels[PITCH], channels[THROTTLE], channels[YAW], channels[AUX1], channels[AUX2], current_id);
+            printf("r%dp%dt%dy%d arming %d, failsafe %d, id %d\n", channels[ROLL], channels[PITCH], channels[THROTTLE], channels[YAW], channels[AUX1], channels[AUX2], current_id);
             left_n = 0;
             right_n = 0;
-            gpio_set_direction(TX_PIN, GPIO_MODE_INPUT);
-            gpio_set_pull_mode(TX_PIN, GPIO_FLOATING);
+
         }
 
         vTaskDelay(1 / portTICK_PERIOD_MS); // ojo diganti

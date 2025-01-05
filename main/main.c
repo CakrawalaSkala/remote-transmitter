@@ -45,6 +45,9 @@ TOGGLE_CHANNEL_CB(AUX1);
 TOGGLE_CHANNEL_CB(AUX2);
 TOGGLE_CHANNEL_CB(AUX3);
 
+bool tx_in_use = 1;
+
+
 button_t arming_button;
 button_t mekanisme_button;
 button_t switch_button;
@@ -65,6 +68,69 @@ float right_n = 0;
 
 struct imu_data left_imu_offset = { 0 };
 struct imu_data right_imu_offset = { 0 };
+
+
+// Parse attitude data from buffer
+bool parse_attitude_data(uint8_t *data, attitude_data_t *attitude) {
+    if (data[2] != ATTITUDE_PACKET_TYPE) {
+        return false;
+    }
+    
+    // Convert bytes to float values
+    attitude->pitch = (float)(int16_t)((data[3] << 8) | data[4]) / 10000.0f;
+    attitude->roll = (float)(int16_t)((data[5] << 8) | data[6]) / 10000.0f;
+    attitude->yaw = (float)(int16_t)((data[7] << 8) | data[8]) / 10000.0f;
+    
+    return true;
+}
+
+void read_crsf_attitude(void) {
+    uint8_t data[BUF_SIZE];
+    attitude_data_t attitude = {0};
+    
+    while (1) {
+        // Read data from UART
+        if(tx_in_use) {
+            vTaskDelay(pdMS_TO_TICKS(5));
+            continue;
+        }
+        int len = uart_read_bytes(UART_PORT, data, BUF_SIZE, pdMS_TO_TICKS(100));
+        
+        if (len > 0) {
+            // Look for valid packets in the received data
+            for (int i = 0; i < len - ATTITUDE_PACKET_LENGTH; i++) {
+                if (parse_attitude_data(&data[i], &attitude)) {
+                    ESP_LOGI(TAG, "Attitude: Pitch=%.2f Roll=%.2f Yaw=%.2f (rad)",
+                            attitude.pitch, attitude.roll, attitude.yaw);
+                    break;
+                }
+            }
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(5)); // Add small delay to prevent CPU hogging
+    }
+}
+
+
+void handle_read_crsf_attitude(void) {
+    uint8_t data[BUF_SIZE];
+    attitude_data_t attitude = {0};
+
+        int len = uart_read_bytes(UART_PORT, data, BUF_SIZE, pdMS_TO_TICKS(100));
+        
+        if (len > 0) {
+            // Look for valid packets in the received data
+            for (int i = 0; i < len - ATTITUDE_PACKET_LENGTH; i++) {
+                printf("parsing \n");
+                if (parse_attitude_data(&data[i], &attitude)) {
+                    ESP_LOGI(TAG, "Attitude: Pitch=%.2f Roll=%.2f Yaw=%.2f (rad)",
+                            attitude.pitch, attitude.roll, attitude.yaw);
+                    break;
+                }
+            }
+        }    
+    }
+
 
 void  switch_cb() {
     // yaw_lock = !yaw_lock;
@@ -164,7 +230,7 @@ void uart_init() {
     // Set UART mode to half-duplex
     uart_set_mode(UART_NUM, UART_MODE_UART);
     // Invert RX and TX signals
-    uart_set_line_inverse(UART_NUM, UART_SIGNAL_TXD_INV);
+    uart_set_line_inverse(UART_NUM, UART_SIGNAL_TXD_INV | UART_SIGNAL_RXD_INV);
     // UART_SIGNAL_RXD_INV
 }
 
@@ -280,25 +346,37 @@ void right_imu_task() {
     }
 
 }
+
 void elrs_task(void *pvParameters) {
     uint8_t packet[MAX_PACKET_LENGTH] = { 0 };
 
     while (true) {
         if (should_switch) {
             create_model_switch_packet(current_id, packet);
+            tx_in_use = 1;
             elrs_send_data(UART_NUM, packet, MODEL_SWITCH_PACKET_LENGTH);
+            tx_in_use = 0;
+            send_subscribe_packet();
+
             should_switch = 0;
         }
         if (should_transmit && left_calibrated && right_calibrated) {
             should_transmit = false;
             create_crsf_channels_packet(channels, packet);
+            tx_in_use = 1;
+
             elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
-            printf("r%dp%dt%dy%d arming %d, failsafe %d, id %d\n", channels[ROLL], channels[PITCH], channels[THROTTLE], channels[YAW], channels[AUX1], channels[AUX2], current_id);
+            handle_read_crsf_attitude();
+            tx_in_use = 0;
+
+
+            // printf("r%dp%dt%dy%d arming %d, failsafe %d, id %d\n", channels[ROLL], channels[PITCH], channels[THROTTLE], channels[YAW], channels[AUX1], channels[AUX2], current_id);
             left_n = 0;
             right_n = 0;
         }
 
         vTaskDelay(1 / portTICK_PERIOD_MS); // ojo diganti
+
     }
 }
 
@@ -309,11 +387,12 @@ void app_main(void) {
     i2c_init();
     timer_init();
     gpio_init();
-
+    
     // switch_id();
     // switch_init();
 
     xTaskCreatePinnedToCore(left_imu_task, "left_imu", 4096, NULL, 4, NULL, 0);
     xTaskCreatePinnedToCore(right_imu_task, "right_imu", 4096, NULL, 4, NULL, 0);
     xTaskCreatePinnedToCore(elrs_task, "send_payload", 4096, NULL, tskIDLE_PRIORITY, NULL, 1);
+    // xTaskCreatePinnedToCore(read_crsf_attitude, "read", 4096, NULL, 5,NULL,  1);
 }  

@@ -1,12 +1,25 @@
 
 #include "driver/gpio.h"
 
+#define ATTITUDE_PACKET_TYPE 0x1E  // Assuming this is the ATTITUDE packet type from PacketsTypes
+#define ATTITUDE_PACKET_LENGTH 11   // 3 bytes header + 6 bytes data + 2 bytes CRC
+#define UART_PORT UART_NUM_2       // Using UART2, change as needed
+#define BUF_SIZE 1024
+
 #define MAX_CHANNEL_VALUE 1984
 #define MIN_CHANNEL_VALUE 0
 
 #define MAX_PACKET_LENGTH 26
 #define CHANNEL_PACKET_LENGTH 26
 #define MODEL_SWITCH_PACKET_LENGTH 10
+
+typedef struct {
+    float pitch;
+    float roll;
+    float yaw;
+} attitude_data_t;
+
+
 
 typedef enum {
     DEVICE_ADDRESS_BROADCAST = 0x00,
@@ -18,6 +31,7 @@ typedef enum {
 typedef enum {
     FRAME_TYPE_RC_CHANNELS = 0x16,
     FRAME_TYPE_PING = 0x28,
+    FRAME_TYPE_ATTITUDE = 0x1E,
     FRAME_TYPE_DEVICE_INFO = 0x29,
     FRAME_TYPE_DIRECT_COMMANDS = 0x32,
 } crsf_frame_type_t;
@@ -25,7 +39,14 @@ typedef enum {
 typedef enum {
     COMMAND_CROSSFIRE = 0x10,
     COMMAND_REMOTE_RELATED = 0x3A,
+    COMMAND_SET_SUBSCRIBE = 0x20,
+
 } crsf_commands_t;
+
+typedef enum {
+    SUBSCRIBE_ENABLE = 0x01,
+    SUBSCRIBE_DISABLE = 0x02,
+} flow_control_t;
 
 typedef enum {
     CROSSFIRE_COMMAND_RECEIVER_BIND = 0x01,
@@ -62,3 +83,4 @@ void elrs_send_data(const int port, const uint8_t *data, size_t len);
 
 void create_crsf_channels_packet(uint16_t *channels, uint8_t *packet);
 void create_model_switch_packet(uint8_t id, uint8_t *packet);
+void send_subscribe_packet();

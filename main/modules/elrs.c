@@ -109,3 +109,25 @@ void create_model_switch_packet(uint8_t id, uint8_t *packet) {
     packet[8] = get_crc8(&packet[2], 6, CRSF_CRC_COMMAND_POLY);
     packet[9] = get_crc8(&packet[2], 7, CRSF_CRC_POLY);
 }
+
+void send_subscribe_packet() {
+    // if (current_id == id) return;
+    // current_id = id;
+
+    ESP_LOGI(TAG, "subscribe" );
+    uint8_t packet[11];
+    packet[0] = DEVICE_ADDRESS_FLIGHT_CONTROLLER;
+    packet[1] = 8;
+    packet[2] = FRAME_TYPE_DIRECT_COMMANDS;
+    packet[3] = DEVICE_ADDRESS_TX_MODULE;
+    packet[4] = DEVICE_ADDRESS_REMOTE_CONTROL;
+    packet[5] = COMMAND_SET_SUBSCRIBE;
+    packet[6] = SUBSCRIBE_ENABLE;
+    packet[7] = FRAME_TYPE_ATTITUDE;
+    packet[8] = 5; // in ms 
+    packet[9] = get_crc8(&packet[2], 7, CRSF_CRC_COMMAND_POLY);
+    packet[10] = get_crc8(&packet[2], 8, CRSF_CRC_POLY);
+
+    elrs_send_data(UART_NUM_2, packet, 11);
+
+}

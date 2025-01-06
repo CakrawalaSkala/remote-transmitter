@@ -60,8 +60,8 @@ struct imu_data right_imu_center = { PITCH_CENTER, ROLL_CENTER, 0 };
 struct full_imu_data left_imu_data;
 struct full_imu_data right_imu_data;
 
-float left_n = 0;
-float right_n = 0;
+int left_error = 0;
+int right_error = 0;
 
 struct imu_data left_imu_offset = { 0 };
 struct imu_data right_imu_offset = { 0 };
@@ -81,12 +81,12 @@ void reset_cb() {
 
 void gpio_init() {
     ESP_ERROR_CHECK(button_init(&arming_button, /* Button instance */
-        GPIO_NUM_13,                       /* Button GPIO number */
+        GPIO_NUM_27,                       /* Button GPIO number */
         BUTTON_EDGE_FALLING,
         tskIDLE_PRIORITY + 10,            /* Button FreeRTOS task priority */
         configMINIMAL_STACK_SIZE * 4));   /* Button FreeRTOS task stack size */
     ESP_ERROR_CHECK(button_init(&mekanisme_button, /* Button instance */
-        GPIO_NUM_27,                       /* Button GPIO number */
+        GPIO_NUM_13,                       /* Button GPIO number */
         BUTTON_EDGE_FALLING,
         tskIDLE_PRIORITY + 10,            /* Button FreeRTOS task priority */
         configMINIMAL_STACK_SIZE * 4));   /* Button FreeRTOS task stack size */
@@ -102,7 +102,7 @@ void gpio_init() {
 
     button_add_cb(&arming_button, BUTTON_CLICK_MEDIUM, AUX1_cb, NULL);
     // button_add_cb(&arming_button, BUTTON_CLICK_LONG, AUX1_cb, NULL);
-    // button_add_cb(&arming_button, BUTTON_CLICK_SINGLE, AUX1_cb, NULL);
+    button_add_cb(&arming_button, BUTTON_CLICK_SINGLE, AUX1_cb, NULL);
 
     // mekanisme_button
     // button_add_cb(&mekanisme_button, BUTTON_CLICK_SINGLE, AUX2_cb, NULL);
@@ -203,9 +203,14 @@ void left_imu_task() {
     struct mahony_filter mahony = create_mahony_filter(NULL);
 
     while (true) {
-        if(!imu_read(imu, &left_imu_data)) continue;
+        if(!imu_read(imu, &left_imu_data)) {
+            left_error++;
+            channels[YAW] = MAX_CHANNEL_VALUE / 2;
+
+            vTaskDelay(2 / portTICK_PERIOD_MS);
+            continue;
+        }
         
-        left_n++;
         // Do filtering
         apply_mahony_filter(&mahony, &left_imu_data.gyro, &left_imu_data.acce,
             left_imu_data.delta_t, left_imu_data.q);
@@ -216,13 +221,9 @@ void left_imu_task() {
 
 
         /*Mapping degree to PWM*/
-        if (left_n > 1) {
-            channels[THROTTLE] = (left_n - 1) / left_n * channels[THROTTLE] + 1 / left_n * mapValue(left_imu_data.processed.x - left_imu_offset.x, -45, 45, MAX_CHANNEL_VALUE, 0);
-            channels[YAW] = (left_n - 1) / left_n * channels[YAW] + 1 / left_n * mapValue(left_imu_data.processed.y - left_imu_offset.y, -45, 45, MAX_CHANNEL_VALUE, 0);
-        } else {
-            channels[THROTTLE] = mapValue(left_imu_data.processed.x - left_imu_offset.x, -45, 45, MAX_CHANNEL_VALUE, 0);
-            channels[YAW] = mapValue(left_imu_data.processed.y - left_imu_offset.y, -45, 45, MAX_CHANNEL_VALUE, 0);
-        }
+        channels[THROTTLE] = mapValue(left_imu_data.processed.x - left_imu_offset.x, -45, 45, 0, MAX_CHANNEL_VALUE);
+        channels[YAW] = mapValue(left_imu_data.processed.y - left_imu_offset.y, -45, 45, 0, MAX_CHANNEL_VALUE);
+        
         if(yaw_lock && channels[AUX1] == MAX_CHANNEL_VALUE) channels[YAW] = MAX_CHANNEL_VALUE / 2;
         // printf("-");
 
@@ -252,9 +253,15 @@ void right_imu_task() {
 
 
     while (true) {
-        if(!imu_read(imu, &right_imu_data)) continue;
+        if(!imu_read(imu, &right_imu_data)) {
+            right_error++;
+            channels[ROLL] = MAX_CHANNEL_VALUE / 2;
+            channels[PITCH] = MAX_CHANNEL_VALUE / 2;
 
-        right_n++;
+            vTaskDelay(2 / portTICK_PERIOD_MS);
+            continue;
+        }
+
         // Do filtering
         apply_mahony_filter(&mahony, &right_imu_data.gyro, &right_imu_data.acce,
             right_imu_data.delta_t, right_imu_data.q);
@@ -264,14 +271,8 @@ void right_imu_task() {
         applyDeadzone(&right_imu_data.processed.x, right_imu_offset.x, 10);
 
         /*Mapping degree to PWM*/
-        if (right_n > 1) {
-            channels[ROLL] = (right_n - 1) / right_n * channels[ROLL] + 1 / right_n * mapValue(left_imu_data.processed.y - left_imu_offset.y, -45, 45, MAX_CHANNEL_VALUE, 0);
-            channels[PITCH] = (right_n - 1) / right_n * channels[PITCH] + 1 / right_n * mapValue(left_imu_data.processed.x - left_imu_offset.x, -45, 45, MAX_CHANNEL_VALUE, 0);
-        } else {
-            channels[ROLL] = mapValue(right_imu_data.processed.y - right_imu_offset.y, -45, 45, MAX_CHANNEL_VALUE, 0);
-            channels[PITCH] = mapValue(right_imu_data.processed.x - right_imu_offset.x, -45, 45, MAX_CHANNEL_VALUE, 0);
-        }
-        // printf("+");
+        channels[ROLL] = mapValue(right_imu_data.processed.y - right_imu_offset.y, -45, 45, 0, MAX_CHANNEL_VALUE);
+        channels[PITCH] = mapValue(right_imu_data.processed.x - right_imu_offset.x, -45, 45, 0, MAX_CHANNEL_VALUE);
 
         // printf("r%dp%d\n", channels[ROLL], channels[PITCH]);
 
@@ -281,6 +282,7 @@ void right_imu_task() {
 
 }
 void elrs_task(void *pvParameters) {
+    gpio_init();
     uint8_t packet[MAX_PACKET_LENGTH] = { 0 };
 
     while (true) {
@@ -288,14 +290,11 @@ void elrs_task(void *pvParameters) {
             create_model_switch_packet(current_id, packet);
             elrs_send_data(UART_NUM, packet, MODEL_SWITCH_PACKET_LENGTH);
             should_switch = 0;
-        }
-        if (should_transmit && left_calibrated && right_calibrated) {
+        } else if (should_transmit && left_calibrated && right_calibrated) {
             should_transmit = false;
             create_crsf_channels_packet(channels, packet);
             elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
-            printf("r%dp%dt%dy%d arming %d, failsafe %d, id %d\n", channels[ROLL], channels[PITCH], channels[THROTTLE], channels[YAW], channels[AUX1], channels[AUX2], current_id);
-            left_n = 0;
-            right_n = 0;
+            ESP_LOGI("channel", "r%dp%dt%dy%d arming %d, failsafe %d, id %d, left error %d, right error %d", channels[ROLL], channels[PITCH], channels[THROTTLE], channels[YAW], channels[AUX1], channels[AUX2], current_id, left_error, right_error);
         }
 
         vTaskDelay(1 / portTICK_PERIOD_MS); // ojo diganti
@@ -308,7 +307,6 @@ void app_main(void) {
     uart_init();
     i2c_init();
     timer_init();
-    gpio_init();
 
     // switch_id();
     // switch_init();

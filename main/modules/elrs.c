@@ -2,6 +2,9 @@
 #include <stdint.h>
 #include "driver/uart.h"
 #include "esp_log.h"
+#include <string.h> 
+
+
 
 #define TAG "ELRS"
 
@@ -9,6 +12,211 @@
 #define CRSF_CRC_COMMAND_POLY 0xBA
 
 // uint8_t current_id = -1;
+
+
+void init_yaw_pid(pid_controller_t *pid) {
+//     If too slow → Increase Kp
+// If oscillating → Increase Kd or decrease Kp
+// If not reaching target → Add small Ki
+// If overshooting → Decrease Kp or increase Kd
+// Very conservative starting values
+pid->kp = 0.5f;    // Start with low proportional gain
+pid->ki = 0.0f;    // Start with no integral
+pid->kd = 1.0f;    // Moderate derivative for dampening
+pid->angle_threshold = 2.0f;  // Consider it "done" within 2 degrees
+    pid->prev_error = 0.0f;
+    pid->output_min = -500.0f;  // Maps to RC_MIN when added to RC_MID
+    pid->output_max = 500.0f;   // Maps to RC_MAX when added to RC_MID
+    pid->last_time = 0;
+    pid->is_active = false;
+    pid->target_angle = 90.0f;
+    pid->start_angle = 0.0f;
+    pid->angle_threshold = 2.0f;  // Consider movement complete within 2 degrees
+}
+
+
+void start_yaw_movement(pid_controller_t *pid, float current_angle, float target_angle) {
+    pid->is_active = true;
+    pid->target_angle = target_angle;
+    pid->start_angle = current_angle;
+    pid->integral = 0.0f;  // Reset integral term
+    pid->prev_error = 0.0f;  // Reset error term
+}
+
+float normalize_angle(float angle) {
+    while (angle > 180.0f) angle -= 360.0f;
+    while (angle < -180.0f) angle += 360.0f;
+    return angle;
+}
+
+float get_angle_error(float target, float current) {
+    float error = normalize_angle(target - current);
+    return error;
+}
+
+void update_yaw_pid(uint16_t *channels, pid_controller_t *pid, float current_angle, uint32_t current_time) {
+    // If PID is not active, return center position
+    if (!pid->is_active) {
+        return ;
+    }
+
+    // Calculate time delta
+    float dt = (current_time - pid->last_time) / 1000.0f;
+    if (dt <= 0.0f || dt > 1.0f) {
+        pid->last_time = current_time;
+        return ;
+    }
+
+    // Calculate error
+    float error = get_angle_error(pid->target_angle, current_angle);
+    
+    // Check if we've reached the target
+    if (fabs(error) <= pid->angle_threshold) {
+        pid->is_active = false;  // Deactivate PID
+        return ;  // Return to center position
+    }
+    
+    // Rest of PID calculation remains the same
+    float p_term = pid->kp * error;
+    pid->integral += error * dt;
+    float i_term = pid->ki * pid->integral;
+    float d_term = pid->kd * ((error - pid->prev_error) / dt);
+    pid->prev_error = error;
+    
+    float output = p_term + i_term + d_term;
+    
+    if (output > pid->output_max) {
+        output = pid->output_max;
+        pid->integral -= error * dt;
+    } else if (output < pid->output_min) {
+        output = pid->output_min;
+        pid->integral -= error * dt;
+    }
+    
+    pid->last_time = current_time;
+    
+    uint16_t rc_value = (uint16_t)(RC_MID + output);
+    if (rc_value > RC_MAX) rc_value = RC_MAX;
+    if (rc_value < RC_MIN) rc_value = RC_MIN;
+    
+    channels[YAW] = rc_value;
+    return;
+}
+
+
+ uint8_t crc8_dvb_s2(uint8_t crc, uint8_t a) {
+    crc ^= a;
+    for (int i = 0; i < 8; i++) {
+        if (crc & 0x80) {
+            crc = (crc << 1) ^ 0xD5;
+        } else {
+            crc = crc << 1;
+        }
+    }
+    return crc & 0xFF;
+}
+
+ uint8_t crc8_data(const uint8_t *data, uint8_t len) {
+    uint8_t crc = 0;
+    for (int i = 0; i < len; i++) {
+        crc = crc8_dvb_s2(crc, data[i]);
+    }
+    return crc;
+}
+
+ bool crsf_validate_frame(const uint8_t *frame, uint8_t len) {
+    return crc8_data(frame + 2, len - 3) == frame[len - 1];
+}
+
+bool parse_attitude(const uint8_t *data, attitude_data_t *attitude) {
+    if (!attitude) return false;
+    if(data[2] == CRSF_ATTITUDE_PACKET){
+    // Convert big-endian 16-bit integers to float
+    attitude->pitch = (float)((int16_t)((data[3] << 8 | data[4])) / 10000.0f) * RAD_TO_DEG;
+    attitude->roll = (float)((int16_t)((data[5] << 8 | data[6])) / 10000.0f) * RAD_TO_DEG;
+    attitude->yaw = (float)((int16_t)((data[7] << 8 | data[8])) / 10000.0f) * RAD_TO_DEG;
+    }
+    else if(data[2] == CRSF_VARIO_PACKET){
+        attitude->vspd = (float)((int16_t)(data[3] << 8 | data[5])) / 10.0;
+        }
+    return true;
+}
+bool process_crsf_uart_data(uint8_t *input_buffer, size_t *input_len, attitude_data_t *attitude) {
+    static uint8_t parse_buffer[64]; // Maximum CRSF packet size
+    static size_t parse_buffer_len = 0;
+    bool attitude_updated = false;
+
+    // Validate input parameters
+    if (!input_buffer || !input_len || !attitude) {
+        return false;
+    }
+
+    // Add new data to parse buffer
+    if (*input_len > 0 && parse_buffer_len < sizeof(parse_buffer)) {
+        // Calculate safe copy length
+        size_t remaining_space = sizeof(parse_buffer) - parse_buffer_len;
+        size_t copy_len = (*input_len < remaining_space) ? *input_len : remaining_space;
+        
+        // Ensure source and destination don't overlap
+        if (input_buffer + copy_len <= parse_buffer || input_buffer >= parse_buffer + sizeof(parse_buffer)) {
+            memcpy(parse_buffer + parse_buffer_len, input_buffer, copy_len);
+        } else {
+            memmove(parse_buffer + parse_buffer_len, input_buffer, copy_len);
+        }
+        parse_buffer_len += copy_len;
+        
+        // Remove processed data from input buffer
+        if (copy_len < *input_len) {
+            size_t remaining_data = *input_len - copy_len;
+            memmove(input_buffer, input_buffer + copy_len, remaining_data);
+            *input_len = remaining_data;
+        } else {
+            *input_len = 0;
+        }
+    }
+
+    // Process packets while we have enough data
+    while (parse_buffer_len >= 2) {  // Changed from > 2 to >= 2 to prevent underflow
+        uint8_t expected_len = parse_buffer[1] + 2;
+        
+        // Validate packet length
+        if (expected_len > sizeof(parse_buffer) || expected_len < 4) {
+            // Invalid length, clear buffer and start fresh
+            parse_buffer_len = 0;
+            break;
+        }
+
+        // Check if we have a complete packet
+        if (parse_buffer_len >= expected_len) {
+            // Validate CRC
+            if (crsf_validate_frame(parse_buffer, expected_len)) {
+                // Check if it's an attitude packet
+                // if (parse_buffer[2] == CRSF_ATTITUDE_PACKET) {
+                if (parse_attitude(parse_buffer, attitude)) {
+                    attitude_updated = true;
+                    ESP_LOGD(TAG, "Tlmtry: Pitch=%.2f Roll=%.2f Yaw=%.2f (rad)",
+                            attitude->pitch, attitude->roll, attitude->yaw);
+                }
+                // }
+
+            } else {
+                ESP_LOGW(TAG, "CRC error in CRSF packet");
+            }
+
+            // Remove processed packet from buffer
+            if (parse_buffer_len > expected_len) {
+                memmove(parse_buffer, parse_buffer + expected_len, parse_buffer_len - expected_len);
+            }
+            parse_buffer_len -= expected_len;
+        } else {
+            // Not enough data for a complete packet
+            break;
+        }
+    }
+
+    return attitude_updated;
+}
+
 
 uint8_t get_crc8(uint8_t *buf, size_t size, uint8_t poly) {
     uint8_t crc8 = 0x00;
@@ -33,6 +241,8 @@ void elrs_send_data(const int port, const uint8_t *data, size_t len) {
         ESP_LOGE(TAG, "Send data critical failure.");
     }
 }
+
+
 
 // Function to pack CRSF channels into bytes
 void pack_crsf_to_bytes(uint16_t *channels, uint8_t *result) {

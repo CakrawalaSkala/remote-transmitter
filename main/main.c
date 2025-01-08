@@ -22,6 +22,8 @@
 
 // static const char *TAG = "Tes";
 
+attitude_data_t  current_attiitude = {0};
+
 // ELRS UART
 #define UART_NUM UART_NUM_2
 #define TX_PIN 17
@@ -29,6 +31,9 @@
 
 //TIMER
 #define INTERVALMS 3 * 1000 // in microseconds
+
+pid_controller_t yaw_pid;
+
 
 static bool left_calibrated = 0;
 static bool right_calibrated = 0;
@@ -79,6 +84,12 @@ void reset_cb() {
     right_imu_offset = imu_substract_return(right_imu_data.processed, right_imu_center);
 }
 
+void turn_command_cb(){
+    yaw_pid.is_active = !yaw_pid.is_active;
+    ESP_LOGI("gpio", " turn is %d", yaw_pid.is_active);
+
+}
+
 void gpio_init() {
     ESP_ERROR_CHECK(button_init(&arming_button, /* Button instance */
         GPIO_NUM_27,                       /* Button GPIO number */
@@ -106,8 +117,8 @@ void gpio_init() {
 
     // mekanisme_button
     // button_add_cb(&mekanisme_button, BUTTON_CLICK_SINGLE, AUX2_cb, NULL);
-    button_add_cb(&mekanisme_button, BUTTON_CLICK_MEDIUM, AUX2_cb, NULL);
-    button_add_cb(&mekanisme_button, BUTTON_CLICK_LONG, switch_cb, NULL);
+    button_add_cb(&mekanisme_button, BUTTON_CLICK_MEDIUM, turn_command_cb, NULL);
+    button_add_cb(&mekanisme_button, BUTTON_CLICK_LONG, turn_command_cb, NULL);
 
 
     // switch id
@@ -164,7 +175,7 @@ void uart_init() {
     // Set UART mode to half-duplex
     uart_set_mode(UART_NUM, UART_MODE_UART);
     // Invert RX and TX signals
-    uart_set_line_inverse(UART_NUM, UART_SIGNAL_TXD_INV);
+    uart_set_line_inverse(UART_NUM, UART_SIGNAL_TXD_INV || UART_SIGNAL_RXD_INV);
     // UART_SIGNAL_RXD_INV
 }
 
@@ -189,6 +200,9 @@ void left_imu_task() {
     left_imu_data = create_full_imu_data();
     // Initialize MPU6050
     mpu6050_handle_t imu = imu_init(I2C_NUM_0, MPU6050_I2C_ADDRESS);
+
+
+    init_yaw_pid(&yaw_pid);
 
     /*Calibrate Gyro*/
     for (int i = 0; i < 2000; i++) {
@@ -226,6 +240,9 @@ void left_imu_task() {
         
         if(yaw_lock && channels[AUX1] == MAX_CHANNEL_VALUE) channels[YAW] = MAX_CHANNEL_VALUE / 2;
         // printf("-");
+
+        update_yaw_pid(channels, &yaw_pid, current_attiitude.yaw, xTaskGetTickCount() * portTICK_PERIOD_MS);
+        
 
         // Deadzone
         // applyDeadzone(&channels[YAW], 1500, 50);
@@ -281,6 +298,24 @@ void right_imu_task() {
     }
 
 }
+
+int read_telemetry(){
+    uint8_t rx_buffer[256];
+    size_t rx_buffer_len = uart_read_bytes(UART_NUM, rx_buffer, 256, 15 / portTICK_PERIOD_MS);
+
+    // if(rx_buffer_len > 1) ESP_LOGI("uart", "length %d", rx_buffer_len);
+
+    if (process_crsf_uart_data(rx_buffer, &rx_buffer_len, &current_attiitude)) {
+        // ESP_LOGI("telemetry", "R%.2f/ P%.2f Y%.2f V%.2f", current_attiitude.roll, current_attiitude.pitch,  current_attiitude.yaw, current_attiitude.vspd);
+        return 1;
+    }
+    return 0;
+}
+
+
+
+
+
 void elrs_task(void *pvParameters) {
     gpio_init();
     uint8_t packet[MAX_PACKET_LENGTH] = { 0 };
@@ -291,10 +326,14 @@ void elrs_task(void *pvParameters) {
             elrs_send_data(UART_NUM, packet, MODEL_SWITCH_PACKET_LENGTH);
             should_switch = 0;
         } else if (should_transmit && left_calibrated && right_calibrated) {
+
+
             should_transmit = false;
             create_crsf_channels_packet(channels, packet);
             elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
             ESP_LOGI("channel", "r%dp%dt%dy%d arming %d, failsafe %d, id %d, left error %d, right error %d", channels[ROLL], channels[PITCH], channels[THROTTLE], channels[YAW], channels[AUX1], channels[AUX2], current_id, left_error, right_error);
+
+            read_telemetry();
         }
 
         vTaskDelay(1 / portTICK_PERIOD_MS); // ojo diganti

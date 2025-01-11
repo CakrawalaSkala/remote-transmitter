@@ -1,3 +1,17 @@
+#include "iot_button.h"
+
+button_handle_t init_btn(gpio_num_t gpio) {
+    button_config_t gpio_btn_cfg = {
+        .type = BUTTON_TYPE_GPIO,
+        .gpio_button_config = {
+            .gpio_num = gpio,
+            .active_level = 0,
+        },
+    };
+
+    return iot_button_create(&gpio_btn_cfg);
+}
+
 float mapValue(float value, float inputMin, float inputMax, float outputMin, float outputMax) {
     if (value < inputMin) return outputMin;
     else if (value > inputMax) return outputMax;

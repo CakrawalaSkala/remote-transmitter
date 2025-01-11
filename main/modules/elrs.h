@@ -1,18 +1,22 @@
 
 #include "driver/gpio.h"
+#include <math.h>
 
 #define MAX_CHANNEL_VALUE 1984
+#define MID_CHANNEL_VALUE MAX_CHANNEL_VALUE / 2
 #define MIN_CHANNEL_VALUE 0
-
-#include <math.h>
 
 #define MAX_PACKET_LENGTH 26
 #define CHANNEL_PACKET_LENGTH 26
 #define MODEL_SWITCH_PACKET_LENGTH 10
 
-#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+#define RC_MIN 1200
+#define RC_MID 1225
+#define RC_MAX 1250
+#define RC_RANGE (RC_MAX - RC_MIN)
 
-#define RAD_TO_DEG 57.295779513f  // 180/π
+#define RAD_TO_DEG 57.295779513f
+
 typedef struct {
     float kp;
     float ki;
@@ -22,7 +26,7 @@ typedef struct {
     float output_min;
     float output_max;
     uint32_t last_time;
-    
+
     // New fields for event-based control
     bool is_active;         // Whether PID is currently controlling
     float target_angle;     // Stored target angle
@@ -30,37 +34,17 @@ typedef struct {
     float angle_threshold;  // How close we need to be to target to consider it "done"
 } pid_controller_t;
 
-void start_yaw_movement(pid_controller_t *pid, float current_angle, float target_angle);
-void init_yaw_pid(pid_controller_t *pid);
-float normalize_angle(float angle);
-float get_angle_error(float target, float current) ;
-
-void update_yaw_pid(uint16_t *channels, pid_controller_t *pid,  float current_angle, uint32_t current_time);
-
-#define RC_MIN 988
-#define RC_MID 1500
-#define RC_MAX 2012
-#define RC_RANGE (RC_MAX - RC_MIN)
-
-
 typedef struct {
     float pitch;
     float roll;
     float yaw;
-    float vspd;
 } attitude_data_t;
 
- bool parse_attitude(const uint8_t *data, attitude_data_t *attitude) ;
- bool crsf_validate_frame(const uint8_t *frame, uint8_t len);
- uint8_t crc8_data(const uint8_t *data, uint8_t len);
- uint8_t crc8_dvb_s2(uint8_t crc, uint8_t a);
-bool process_crsf_uart_data(uint8_t *input_buffer, size_t *input_len, attitude_data_t *attitude);
-
-
-#define CRSF_SYNC_BYTE 0xC8
-#define CRSF_ATTITUDE_PACKET 0x1E
-#define CRSF_VARIO_PACKET 0x07
-
+typedef struct {
+    attitude_data_t attitude;
+    float baro_alt;
+    float vspd;
+} crsf_data_t;
 
 typedef enum {
     DEVICE_ADDRESS_BROADCAST = 0x00,
@@ -70,7 +54,10 @@ typedef enum {
 } crsf_device_address_t;
 
 typedef enum {
+    FRAME_TYPE_VARIO = 0x07,
+    FRAME_TYPE_BARO_ALTITUDE = 0x09,
     FRAME_TYPE_RC_CHANNELS = 0x16,
+    FRAME_TYPE_ATTITUDE = 0x1E,
     FRAME_TYPE_PING = 0x28,
     FRAME_TYPE_DEVICE_INFO = 0x29,
     FRAME_TYPE_DIRECT_COMMANDS = 0x32,
@@ -111,8 +98,22 @@ typedef enum {
     AUX12 = 15
 } crsf_channels_type;
 
+
+// Yaw movement
+float normalize_angle(float angle);
+float get_angle_error(float target, float current);
+void init_yaw_pid(pid_controller_t *pid);
+void start_yaw_movement(pid_controller_t *pid, float current_angle, float target_angle);
+void update_yaw_pid(uint16_t *channels, pid_controller_t *pid, float current_angle, uint32_t current_time);
+
+uint8_t crc8_data(const uint8_t *data, uint8_t len);
+uint8_t crc8_dvb_s2(uint8_t crc, uint8_t a);
+
 uint8_t get_crc8(uint8_t *buf, size_t size, uint8_t poly);
 void elrs_send_data(const int port, const uint8_t *data, size_t len);
+bool crsf_validate_frame(const uint8_t *frame, uint8_t len);
+void process_crsf_data(uint8_t *input_buffer, size_t *input_len, crsf_data_t *crsf_data);
+void parse_data(const uint8_t *data, crsf_data_t *crsf_data);
 
 void create_crsf_channels_packet(uint16_t *channels, uint8_t *packet);
 void create_model_switch_packet(uint8_t id, uint8_t *packet);

@@ -6,6 +6,7 @@
 
 #include "modules/imu.h"
 #include "modules/filters.h"
+
 // Global constant variables
 static const float RAD_TO_DEG = 57.2958;
 static const float DEG_TO_RAD = 0.0174533;
@@ -77,7 +78,6 @@ struct full_imu_data create_full_imu_data() {
 }
 
 esp_err_t imu_read_raw(mpu6050_handle_t mpu6050, struct imu_data *gyro, struct imu_data *acce) {
-    /* MPU6050 variable*/
     esp_err_t err;
     mpu6050_raw_gyro_value_t gyro_data;
     mpu6050_raw_acce_value_t acce_data;
@@ -134,11 +134,9 @@ mpu6050_handle_t imu_init(i2c_port_t port, const uint16_t dev_addr) {
 bool imu_read(mpu6050_handle_t mpu6050, struct full_imu_data *data) {
     esp_err_t err = imu_read_raw(mpu6050, &data->gyro, &data->acce);
     if (err != ESP_OK) {
-        // printf("Failed to read IMU data\n");
-        return false;
+        return 0;
     }
 
-    // Apply offsets and scaling
     imu_substract(&data->gyro, data->offset);
     imu_multiply_single(&data->gyro, DEG_TO_RAD * gyro_constant);
     imu_substract(&data->acce, A_offset1);
@@ -149,12 +147,10 @@ bool imu_read(mpu6050_handle_t mpu6050, struct full_imu_data *data) {
     data->delta_t = (data->now - data->last) * 0.000001;
     data->last = data->now;
 
-    return true;
+    return 1;
 }
 
 void imu_process(struct full_imu_data *data) {
     quaternion_to_euler(data->q, &data->processed);
-
-    // Convert to degrees
     imu_multiply_single(&data->processed, RAD_TO_DEG);
 }

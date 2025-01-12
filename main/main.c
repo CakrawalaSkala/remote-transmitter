@@ -282,7 +282,7 @@ void elrs_writer_task(void *pvParameters) {
             should_switch = 0;
         } else if (should_transmit && left_calibrated && right_calibrated) {
             should_transmit = 0;
-            update_yaw_pid(channels, &yaw_pid, crsf_data.attitude.yaw, xTaskGetTickCount() * portTICK_PERIOD_MS);
+            update_yaw_pid(channels, &yaw_pid, get_interpolated_yaw(&crsf_data.attitude), xTaskGetTickCount() * portTICK_PERIOD_MS);
             create_crsf_channels_packet(channels, packet);
             elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
             // ESP_LOGI("channel", "a%dfs%did%dmech%dturn%dler%drer%d", channels[ARMING_CHANNEL], channels[FAILSAFE_CHANNEL], current_mechanism, current_id, yaw_pid.is_active, left_error, right_error);

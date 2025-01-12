@@ -9,6 +9,36 @@
 #define CRSF_CRC_POLY 0xD5
 #define CRSF_CRC_COMMAND_POLY 0xBA
 
+// Utils
+uint8_t get_crc8(uint8_t *buf, size_t size, uint8_t poly) {
+    uint8_t crc8 = 0x00;
+
+    for (int i = 0; i < size; i++) {
+        crc8 ^= buf[i];
+        for (int j = 0; j < 8; j++) {
+            if (crc8 & 0x80) {
+                crc8 <<= 1;
+                crc8 ^= poly;
+            } else {
+                crc8 <<= 1;
+            }
+        }
+    }
+    return crc8;
+}
+
+float normalize_angle(float angle) {
+    while (angle > 180.0f) angle -= 360.0f;
+    while (angle < -180.0f) angle += 360.0f;
+    return angle;
+}
+
+float get_angle_error(float target, float current) {
+    float error = normalize_angle(target - current);
+    return error;
+}
+
+// PID
 void init_yaw_pid(pid_controller_t *pid) {
 //     If too slow → Increase Kp
 // If oscillating → Increase Kd or decrease Kp
@@ -28,7 +58,6 @@ void init_yaw_pid(pid_controller_t *pid) {
     pid->start_angle = 0.0f;
     pid->angle_threshold = 2.0f;  // Consider movement complete within 2 degrees
 }
-
 void start_yaw_movement(pid_controller_t *pid, float current_angle, float target_angle) {
     pid->is_active = true;
     pid->target_angle = target_angle;
@@ -36,18 +65,6 @@ void start_yaw_movement(pid_controller_t *pid, float current_angle, float target
     pid->integral = 0.0f;  // Reset integral term
     pid->prev_error = 0.0f;  // Reset error term
 }
-
-float normalize_angle(float angle) {
-    while (angle > 180.0f) angle -= 360.0f;
-    while (angle < -180.0f) angle += 360.0f;
-    return angle;
-}
-
-float get_angle_error(float target, float current) {
-    float error = normalize_angle(target - current);
-    return error;
-}
-
 void update_yaw_pid(uint16_t *channels, pid_controller_t *pid, float current_angle, uint32_t current_time) {
     // If PID is not active, return center position
     if (!pid->is_active) {
@@ -95,40 +112,42 @@ void update_yaw_pid(uint16_t *channels, pid_controller_t *pid, float current_ang
 
     channels[YAW] = rc_value;
 }
+float get_interpolated_yaw(attitude_data_t *attitude) {
+    uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    float time_since_update = (current_time - attitude->last_update_time);
 
-
-uint8_t crc8_dvb_s2(uint8_t crc, uint8_t a) {
-    crc ^= a;
-    for (int i = 0; i < 8; i++) {
-        if (crc & 0x80) {
-            crc = (crc << 1) ^ 0xD5;
-        } else {
-            crc = crc << 1;
-        }
+    // Only interpolate for a reasonable time window (e.g., up to 16ms)
+    if (time_since_update < 16) {
+        return normalize_angle(attitude->yaw + (attitude->yaw_rate * time_since_update));
     }
-    return crc & 0xFF;
+
+    return attitude->yaw;
 }
 
-uint8_t crc8_data(const uint8_t *data, uint8_t len) {
-    uint8_t crc = 0;
-    for (int i = 0; i < len; i++) {
-        crc = crc8_dvb_s2(crc, data[i]);
-    }
-    return crc;
+// ELRS
+bool crsf_validate_frame(uint8_t *frame, uint8_t len) {
+    return get_crc8(&frame[2], len - 3, CRSF_CRC_POLY) == frame[len - 1];
 }
-
-bool crsf_validate_frame(const uint8_t *frame, uint8_t len) {
-    return crc8_data(frame + 2, len - 3) == frame[len - 1];
-}
-
 void parse_frame(const uint8_t *data, crsf_data_t *crsf_data) {
     if (!crsf_data) return;
+
+    uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
     switch (data[2]) {
         case FRAME_TYPE_ATTITUDE:
             crsf_data->attitude.pitch = (float)((int16_t)((data[3] << 8 | data[4])) / 10000.0f) * RAD_TO_DEG;
             crsf_data->attitude.roll = (float)((int16_t)((data[5] << 8 | data[6])) / 10000.0f) * RAD_TO_DEG;
+
+            crsf_data->attitude.prev_yaw = crsf_data->attitude.yaw;
             crsf_data->attitude.yaw = (float)((int16_t)((data[7] << 8 | data[8])) / 10000.0f) * RAD_TO_DEG;
+
+            float time_diff = (current_time - crsf_data->attitude.last_update_time);
+            if (time_diff > 0) {
+                float yaw_diff = normalize_angle(crsf_data->attitude.yaw - crsf_data->attitude.prev_yaw);
+                crsf_data->attitude.yaw_rate = yaw_diff / time_diff;
+            }
+
+            crsf_data->attitude.last_update_time = current_time;
             break;
         case FRAME_TYPE_VARIO:
             crsf_data->vspd = (float)((int16_t)(data[3] << 8 | data[5])) / 10.0;
@@ -138,10 +157,10 @@ void parse_frame(const uint8_t *data, crsf_data_t *crsf_data) {
     }
 }
 void process_crsf_data(uint8_t *input_buffer, size_t *input_len, crsf_data_t *crsf_data) {
+    if (!input_buffer || !input_len || !crsf_data) return;
+
     static uint8_t parse_buffer[64];
     static size_t parse_buffer_len = 0;
-
-    if (!input_buffer || !input_len || !crsf_data) return;
 
     // Add new data to parse buffer
     if (*input_len > 0 && parse_buffer_len < sizeof(parse_buffer)) {
@@ -199,23 +218,6 @@ void process_crsf_data(uint8_t *input_buffer, size_t *input_len, crsf_data_t *cr
     }
 }
 
-uint8_t get_crc8(uint8_t *buf, size_t size, uint8_t poly) {
-    uint8_t crc8 = 0x00;
-
-    for (int i = 0; i < size; i++) {
-        crc8 ^= buf[i];
-        for (int j = 0; j < 8; j++) {
-            if (crc8 & 0x80) {
-                crc8 <<= 1;
-                crc8 ^= poly;
-            } else {
-                crc8 <<= 1;
-            }
-        }
-    }
-    return crc8;
-}
-
 void elrs_send_data(const int port, const uint8_t *data, size_t len) {
     if (uart_write_bytes(port, data, len) != len) {
         ESP_LOGE(TAG, "Send data critical failure.");
@@ -225,8 +227,7 @@ void elrs_send_data(const int port, const uint8_t *data, size_t len) {
 }
 
 
-
-// Function to pack CRSF channels into bytes
+// Packet creation
 void pack_crsf_to_bytes(uint16_t *channels, uint8_t *result) {
     size_t result_idx = 0;
     uint32_t newVal = 0;

@@ -38,6 +38,10 @@ typedef struct {
     float pitch;
     float roll;
     float yaw;
+
+    float prev_yaw;
+    float yaw_rate;    // Rate of change between updates
+    uint32_t last_update_time;
 } attitude_data_t;
 
 typedef struct {
@@ -98,22 +102,22 @@ typedef enum {
     AUX12 = 15
 } crsf_channels_type;
 
-
-// Yaw movement
+// Utils
+uint8_t get_crc8(uint8_t *buf, size_t size, uint8_t poly);
 float normalize_angle(float angle);
 float get_angle_error(float target, float current);
+
+// PID
 void init_yaw_pid(pid_controller_t *pid);
 void start_yaw_movement(pid_controller_t *pid, float current_angle, float target_angle);
 void update_yaw_pid(uint16_t *channels, pid_controller_t *pid, float current_angle, uint32_t current_time);
+float get_interpolated_yaw(attitude_data_t *attitude);
 
-uint8_t crc8_data(const uint8_t *data, uint8_t len);
-uint8_t crc8_dvb_s2(uint8_t crc, uint8_t a);
-
-uint8_t get_crc8(uint8_t *buf, size_t size, uint8_t poly);
-void elrs_send_data(const int port, const uint8_t *data, size_t len);
-bool crsf_validate_frame(const uint8_t *frame, uint8_t len);
+// ELRS
+void parse_frame(const uint8_t *data, crsf_data_t *crsf_data);
 void process_crsf_data(uint8_t *input_buffer, size_t *input_len, crsf_data_t *crsf_data);
-void parse_data(const uint8_t *data, crsf_data_t *crsf_data);
+void elrs_send_data(const int port, const uint8_t *data, size_t len);
 
+// Packet Creation
 void create_crsf_channels_packet(uint16_t *channels, uint8_t *packet);
 void create_model_switch_packet(uint8_t id, uint8_t *packet);

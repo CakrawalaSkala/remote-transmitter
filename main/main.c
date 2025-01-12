@@ -22,7 +22,7 @@
 #define DRONE_COUNT 2
 
 // ELRS
-#define INTERVALMS 3 * 1000
+#define INTERVALMS 3 * 1000 // in microseconds
 
 #define UART_NUM UART_NUM_2
 #define TX_PIN 17
@@ -55,7 +55,7 @@ button_handle_t failsafe_btn;
 button_handle_t recalibrate_btn;
 
 // Remote variables
-int8_t current_id = 1;
+int8_t current_id = 0;
 uint16_t channels[16] = { 0 };
 
 struct full_imu_data left_imu_data;
@@ -66,8 +66,6 @@ struct imu_data right_imu_offset = { 0 };
 struct imu_data left_imu_center = { THROTTLE_CENTER, YAW_CENTER, 0 };
 struct imu_data right_imu_center = { PITCH_CENTER, ROLL_CENTER, 0 };
 
-int left_error = 0;
-int right_error = 0;
 bool left_calibrated = 0;
 bool right_calibrated = 0;
 bool should_transmit = 0;
@@ -196,7 +194,6 @@ void left_imu_task() {
 
     while (true) {
         if(!imu_read(imu, &left_imu_data)) {
-            left_error++;
             channels[YAW] = MID_CHANNEL_VALUE;
 
             vTaskDelay(pdMS_TO_TICKS(2));
@@ -239,7 +236,6 @@ void right_imu_task() {
 
     while (true) {
         if(!imu_read(imu, &right_imu_data)) {
-            right_error++;
             channels[ROLL] = MID_CHANNEL_VALUE;
             channels[PITCH] = MID_CHANNEL_VALUE;
 
@@ -261,33 +257,25 @@ void right_imu_task() {
     }
 }
 
-void elrs_reader_task(){
-    uint8_t buffer[MAX_PACKET_LENGTH] = {0};
+void elrs_task(void *pvParameters) {
+    uint8_t packet[MAX_PACKET_LENGTH] = { 0 };
+    uint8_t buffer[256] = {0};
     size_t len = 0;
 
-    while (1)
-    {
-        len = uart_read_bytes(UART_NUM, buffer, MAX_PACKET_LENGTH, pdMS_TO_TICKS(15));
-        process_crsf_data(buffer, &len, &crsf_data);
-    }
-}
-
-void elrs_writer_task(void *pvParameters) {
-    uint8_t packet[MAX_PACKET_LENGTH] = { 0 };
-
     while (true) {
+        update_yaw_pid(channels, &yaw_pid, get_interpolated_yaw(&crsf_data.attitude), xTaskGetTickCount() * portTICK_PERIOD_MS);
         if (should_switch) {
             create_model_switch_packet(current_id, packet);
             elrs_send_data(UART_NUM, packet, MODEL_SWITCH_PACKET_LENGTH);
             should_switch = 0;
         } else if (should_transmit && left_calibrated && right_calibrated) {
             should_transmit = 0;
-            update_yaw_pid(channels, &yaw_pid, get_interpolated_yaw(&crsf_data.attitude), xTaskGetTickCount() * portTICK_PERIOD_MS);
             create_crsf_channels_packet(channels, packet);
             elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
             // ESP_LOGI("channel", "a%dfs%did%dmech%dturn%dler%drer%d", channels[ARMING_CHANNEL], channels[FAILSAFE_CHANNEL], current_mechanism, current_id, yaw_pid.is_active, left_error, right_error);
-            ESP_LOGI("channel", "id%dturn%dyaw%.2f", current_id, yaw_pid.is_active, crsf_data.attitude.yaw);
-            
+            len = uart_read_bytes(UART_NUM, buffer, 256, pdMS_TO_TICKS(15));
+            process_crsf_data(buffer, &len, &crsf_data);
+            ESP_LOGI("channel", "id%dturn%dyaw%.2f", current_id, yaw_pid.is_active, get_interpolated_yaw(&crsf_data.attitude));
         }
 
         vTaskDelay(pdMS_TO_TICKS(1));
@@ -304,6 +292,5 @@ void app_main(void) {
 
     xTaskCreatePinnedToCore(left_imu_task, "left_imu", 4096, NULL, 4, NULL, 0);
     xTaskCreatePinnedToCore(right_imu_task, "right_imu", 4096, NULL, 4, NULL, 0);
-    xTaskCreatePinnedToCore(elrs_reader_task, "elrs_reader", 4096, NULL, tskIDLE_PRIORITY, NULL, 1);
-    xTaskCreatePinnedToCore(elrs_writer_task, "elrs_writer", 4096, NULL, tskIDLE_PRIORITY + 1, NULL, 1);
+    xTaskCreatePinnedToCore(elrs_task, "elrs_writer", 4096, NULL, tskIDLE_PRIORITY, NULL, 1);
 }  

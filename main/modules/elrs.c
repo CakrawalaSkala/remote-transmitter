@@ -48,7 +48,7 @@ void init_yaw_pid(pid_controller_t *pid) {
     pid->kp = 0.5f;    // Start with low proportional gain
     pid->ki = 0.0f;    // Start with no integral
     pid->kd = 1.0f;    // Moderate derivative for dampening
-    pid->angle_threshold = 2.0f;  // Consider it "done" within 2 degrees
+    pid->angle_threshold = 20.0f;  // Consider it "done" within 2 degrees
     pid->prev_error = 0.0f;
     pid->output_min = -500.0f;  // Maps to RC_MIN when added to RC_MID
     pid->output_max = 500.0f;   // Maps to RC_MAX when added to RC_MID
@@ -116,12 +116,7 @@ float get_interpolated_yaw(attitude_data_t *attitude) {
     uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
     float time_since_update = (current_time - attitude->last_update_time);
 
-    // Only interpolate for a reasonable time window (e.g., up to 16ms)
-    if (time_since_update < 16) {
-        return normalize_angle(attitude->yaw + (attitude->yaw_rate * time_since_update));
-    }
-
-    return attitude->yaw;
+    return normalize_angle(attitude->yaw + (attitude->yaw_rate * time_since_update));
 }
 
 // ELRS

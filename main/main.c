@@ -30,8 +30,8 @@
 
 #define ARMING_CHANNEL AUX1
 #define CAMSWITCH_CHANNEL AUX2
-#define FAILSAFE_CHANNEL AUX4
 #define MECHANISM_CHANNEL AUX3
+#define FAILSAFE_CHANNEL AUX4
 
 // Offsets
 #define ROLL_CENTER 0
@@ -40,7 +40,8 @@
 #define YAW_CENTER 0
 
 // Buttons
-#define RIGHT_POINT GPIO_NUM_27
+// #define RIGHT_POINT GPIO_NUM_27
+#define RIGHT_POINT GPIO_NUM_32
 #define RIGHT_MIDDLE GPIO_NUM_13
 #define RIGHT_RING GPIO_NUM_14
 #define LEFT_POINT GPIO_NUM_35
@@ -52,26 +53,17 @@ button_handle_t turn180_button;
 button_handle_t switch_id_button;
 button_handle_t mechanism_btn;
 button_handle_t failsafe_btn;
-button_handle_t recalibrate_btn;
+button_handle_t cam_switch_btn;
 
 // Remote variables
-int8_t current_id = 0;
+int8_t current_id = 1;
 uint16_t channels[16] = { 0 };
-
-struct full_imu_data left_imu_data;
-struct full_imu_data right_imu_data;
-
-struct imu_data left_imu_offset = { 0 };
-struct imu_data right_imu_offset = { 0 };
-struct imu_data left_imu_center = { THROTTLE_CENTER, YAW_CENTER, 0 };
-struct imu_data right_imu_center = { PITCH_CENTER, ROLL_CENTER, 0 };
 
 bool left_calibrated = 0;
 bool right_calibrated = 0;
 bool should_transmit = 0;
 
 bool should_switch = 1;
-bool yaw_lock = 0;
 
 crsf_data_t crsf_data = {0};
 pid_controller_t yaw_pid;
@@ -80,31 +72,21 @@ pid_controller_t yaw_pid;
 void toggle_channel(void *arg, void *data) {
     crsf_channels_type channel = (crsf_channels_type)data;
     channels[channel] = (channels[channel] <= 1000) * MAX_CHANNEL_VALUE;
+    ESP_LOGI("gpio", "channel %d = %d", channel, channels[channel]);
 }
 
-void arm_cb() {
-    // Disable mechanism on armed and disarmed
-    channels[MECHANISM_CHANNEL] = 0;
-    toggle_channel(NULL, (void*)ARMING_CHANNEL);
-}
-
-void switch_cb() {
+void switch_id_cb() {
     should_switch = 1;
     current_id++;
     current_id %= DRONE_COUNT;
     ESP_LOGI("gpio", "Switch id to %d", current_id);
 }
 
-void reset_cb() {
-    left_imu_offset = imu_substract_return(left_imu_data.processed, left_imu_center);
-    right_imu_offset = imu_substract_return(right_imu_data.processed, right_imu_center);
-    ESP_LOGI("gpio", "Remote Recalibrated");
-}
-
 void turn180_cb(){
-    yaw_pid.is_active = !yaw_pid.is_active;
-    if(yaw_pid.is_active){
-        yaw_pid.target_angle = normalize_angle(crsf_data.attitude.yaw + 180);
+    if(!yaw_pid.is_active){
+        start_yaw_movement(&yaw_pid, crsf_data.attitude.yaw, normalize_angle(crsf_data.attitude.yaw + 180));
+    } else {
+        yaw_pid.is_active = false;
     }
     ESP_LOGI("gpio", "turn is %d", yaw_pid.is_active);
 }
@@ -128,20 +110,12 @@ void timer_init() {
 // Initializers
 void gpio_init() {
     // init buttons
-    arming_button = init_btn(RIGHT_RING); 
-    turn180_button = init_btn(RIGHT_MIDDLE);  
-    switch_id_button = init_btn(LEFT_RING);
-    mechanism_btn = init_btn(RIGHT_POINT);
-    failsafe_btn = init_btn(LEFT_MIDDLE);
-    // recalibrate_btn = init_btn(LEFT_POINT);
-    
-    // register callbacks
-    iot_button_register_cb(arming_button, BUTTON_SINGLE_CLICK, arm_cb, NULL);
-    iot_button_register_cb(turn180_button, BUTTON_SINGLE_CLICK, turn180_cb, NULL);
-    iot_button_register_cb(switch_id_button, BUTTON_SINGLE_CLICK, switch_cb, NULL);
-    iot_button_register_cb(mechanism_btn, BUTTON_SINGLE_CLICK, toggle_channel, (void *)MECHANISM_CHANNEL);
-    iot_button_register_cb(failsafe_btn, BUTTON_SINGLE_CLICK, toggle_channel, (void *)FAILSAFE_CHANNEL);
-    // iot_button_register_cb(recalibrate_btn, BUTTON_SINGLE_CLICK, reset_cb, NULL);
+    arming_button = init_btn(RIGHT_RING, toggle_channel, (void *)ARMING_CHANNEL); 
+    cam_switch_btn = init_btn(RIGHT_MIDDLE, toggle_channel, (void *)CAMSWITCH_CHANNEL);
+    mechanism_btn = init_btn(RIGHT_POINT, toggle_channel, (void *)MECHANISM_CHANNEL);
+    // turn180_button = init_btn(LEFT_RING, turn180_cb, NULL);
+    // switch_id_button = init_btn(LEFT_RING, switch_id_cb, NULL);
+    // failsafe_btn = init_btn(LEFT_MIDDLE, toggle_channel, (void *)FAILSAFE_CHANNEL);
 }
 
 void uart_init() {
@@ -177,7 +151,7 @@ void i2c_init() {
 void left_imu_task() {
     init_yaw_pid(&yaw_pid);
 
-    left_imu_data = create_full_imu_data();
+    struct full_imu_data left_imu_data = create_full_imu_data();
     mpu6050_handle_t imu = imu_init(I2C_NUM_0, MPU6050_I2C_ADDRESS);
 
     // Calibration
@@ -204,21 +178,17 @@ void left_imu_task() {
             left_imu_data.delta_t, left_imu_data.q);
         imu_process(&left_imu_data);
     
-        imu_add(&left_imu_data.processed, left_imu_offset);
         applyDeadzone(&left_imu_data.processed.y, 0, 10);
 
-        channels[THROTTLE] = mapValue(left_imu_data.processed.x - left_imu_offset.x, -45, 45, 0, MAX_CHANNEL_VALUE);
-        channels[YAW] = mapValue(left_imu_data.processed.y - left_imu_offset.y, -45, 45, 0, MAX_CHANNEL_VALUE);
-        
-        // Yaw lock (when armed only)
-        if(yaw_lock && channels[ARMING_CHANNEL] == MAX_CHANNEL_VALUE) channels[YAW] = MID_CHANNEL_VALUE;
+        channels[THROTTLE] = mapValue(left_imu_data.processed.x, -45, 45, 0, MAX_CHANNEL_VALUE);
+        channels[YAW] = mapValue(left_imu_data.processed.y, -45, 45, 0, MAX_CHANNEL_VALUE);
         
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
 void right_imu_task() {
-    right_imu_data = create_full_imu_data();
+    struct full_imu_data right_imu_data = create_full_imu_data();
     mpu6050_handle_t imu = imu_init(I2C_NUM_0, MPU6050_I2C_ADDRESS_1);
 
     // Calibration
@@ -247,11 +217,11 @@ void right_imu_task() {
             right_imu_data.delta_t, right_imu_data.q);
         imu_process(&right_imu_data);
 
-        applyDeadzone(&right_imu_data.processed.y, right_imu_offset.y, 10);
-        applyDeadzone(&right_imu_data.processed.x, right_imu_offset.x, 10);
+        applyDeadzone(&right_imu_data.processed.y, 0, 10);
+        applyDeadzone(&right_imu_data.processed.x, 0, 10);
 
-        channels[ROLL] = mapValue(right_imu_data.processed.y - right_imu_offset.y, -45, 45, 0, MAX_CHANNEL_VALUE);
-        channels[PITCH] = mapValue(right_imu_data.processed.x - right_imu_offset.x, -45, 45, 0, MAX_CHANNEL_VALUE);
+        channels[ROLL] = mapValue(right_imu_data.processed.y, -45, 45, 0, MAX_CHANNEL_VALUE);
+        channels[PITCH] = mapValue(right_imu_data.processed.x, -45, 45, 0, MAX_CHANNEL_VALUE);
 
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -273,9 +243,9 @@ void elrs_task(void *pvParameters) {
             create_crsf_channels_packet(channels, packet);
             elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
             // ESP_LOGI("channel", "a%dfs%did%dmech%dturn%dler%drer%d", channels[ARMING_CHANNEL], channels[FAILSAFE_CHANNEL], current_mechanism, current_id, yaw_pid.is_active, left_error, right_error);
+            uart_wait_tx_done(UART_NUM, pdMS_TO_TICKS(15));
             len = uart_read_bytes(UART_NUM, buffer, 256, pdMS_TO_TICKS(15));
             process_crsf_data(buffer, &len, &crsf_data);
-            ESP_LOGI("channel", "id%dturn%dyaw%.2f", current_id, yaw_pid.is_active, get_interpolated_yaw(&crsf_data.attitude));
         }
 
         vTaskDelay(pdMS_TO_TICKS(1));
@@ -284,7 +254,7 @@ void elrs_task(void *pvParameters) {
 
 
 
-void app_main(void) {
+void app_main(void) {    
     gpio_init();
     uart_init();
     i2c_init();

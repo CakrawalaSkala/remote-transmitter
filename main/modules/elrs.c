@@ -48,8 +48,7 @@ void init_yaw_pid(pid_controller_t *pid) {
     pid->kp = 0.5f;    // Start with low proportional gain
     pid->ki = 0.0f;    // Start with no integral
     pid->kd = 1.0f;    // Moderate derivative for dampening
-    pid->angle_threshold = 20.0f;  // Consider it "done" within 2 degrees
-    pid->prev_error = 0.0f;
+    pid->prev_error = 0;
     pid->output_min = -500.0f;  // Maps to RC_MIN when added to RC_MID
     pid->output_max = 500.0f;   // Maps to RC_MAX when added to RC_MID
     pid->last_time = 0;
@@ -63,7 +62,7 @@ void start_yaw_movement(pid_controller_t *pid, float current_angle, float target
     pid->target_angle = target_angle;
     pid->start_angle = current_angle;
     pid->integral = 0.0f;  // Reset integral term
-    pid->prev_error = 0.0f;  // Reset error term
+    pid->prev_error = get_angle_error(pid->target_angle, current_angle);  // Reset error term
 }
 void update_yaw_pid(uint16_t *channels, pid_controller_t *pid, float current_angle, uint32_t current_time) {
     // If PID is not active, return center position
@@ -82,8 +81,8 @@ void update_yaw_pid(uint16_t *channels, pid_controller_t *pid, float current_ang
     float error = get_angle_error(pid->target_angle, current_angle);
 
     // Check if we've reached the target
-    if (fabs(error) <= pid->angle_threshold) {
-        pid->is_active = false;  // Deactivate PID
+    if (fabs(error) <= pid->angle_threshold || (fabs(pid->prev_error) < fabs(error))) {
+        pid->is_active = false;
         return;  // Return to center position
     }
 

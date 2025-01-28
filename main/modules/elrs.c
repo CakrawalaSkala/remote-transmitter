@@ -118,16 +118,48 @@ float get_interpolated_yaw(attitude_data_t *attitude) {
     return normalize_angle(attitude->yaw + (attitude->yaw_rate * time_since_update));
 }
 
+
+// Convert packed altitude to meters
+float unpack_altitude_to_meters(uint16_t packed) {
+    int32_t altitude_dm = (packed & 0x8000) ? 
+                         ((packed & 0x7fff) * 10) :  // Meter resolution case
+                         (packed - ALT_MIN_DM);      // Decimeter resolution case
+    
+    return (float)altitude_dm / 10.0f;  // Convert decimeters to meters
+}
+
+// Unpack vertical speed (implementation depends on your needs)
+float unpack_vertical_speed(int8_t packed) {
+    // Vertical speed is packed in 3cm/s units with 25m/s range
+    return (float)packed * 0.03f;  // Convert to m/s
+}
+
+
 // ELRS
 bool crsf_validate_frame(uint8_t *frame, uint8_t len) {
     return get_crc8(&frame[2], len - 3, CRSF_CRC_POLY) == frame[len - 1];
 }
+
+
 void parse_frame(const uint8_t *data, crsf_data_t *crsf_data) {
     if (!crsf_data) return;
 
     uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
-
+    printf("0x%02X ", data[2]);
     switch (data[2]) {
+        case FRAME_TYPE_BARO_ALTITUDE: {
+        uint16_t alt_packed = (uint16_t)(data[3] << 8 | data[4]);
+        int8_t speed_packed = (int8_t)data[5];
+        
+        crsf_data->baro_alt = unpack_altitude_to_meters(alt_packed);
+        crsf_data->vspd = unpack_vertical_speed(speed_packed);
+        
+        // For debug printing
+        ESP_LOGI("tlm", "Altitude: %.2f m, Vertical Speed: %.2f m/s\n", 
+            crsf_data->baro_alt, 
+            crsf_data->vspd);
+        break;
+        
         case FRAME_TYPE_ATTITUDE:
             crsf_data->attitude.pitch = (float)((int16_t)((data[3] << 8 | data[4])) / 10000.0f) * RAD_TO_DEG;
             crsf_data->attitude.roll = (float)((int16_t)((data[5] << 8 | data[6])) / 10000.0f) * RAD_TO_DEG;
@@ -143,12 +175,14 @@ void parse_frame(const uint8_t *data, crsf_data_t *crsf_data) {
 
             crsf_data->attitude.last_update_time = current_time;
             break;
-        case FRAME_TYPE_VARIO:
-            crsf_data->vspd = (float)((int16_t)(data[3] << 8 | data[5])) / 10.0;
-
-        default:
+        // case FRAME_TYPE_VARIO:
+        //     crsf_data->vspd = (float)((int16_t)(data[3] << 8 | data[5])) / 10.0;
+        
+        
+    default:
             break;
     }
+}
 }
 void process_crsf_data(uint8_t *input_buffer, size_t *input_len, crsf_data_t *crsf_data) {
     if (!input_buffer || !input_len || !crsf_data) return;
@@ -278,4 +312,20 @@ void create_model_switch_packet(uint8_t id, uint8_t *packet) {
     packet[7] = id;
     packet[8] = get_crc8(&packet[2], 6, CRSF_CRC_COMMAND_POLY);
     packet[9] = get_crc8(&packet[2], 7, CRSF_CRC_POLY);
+}
+
+void create_subscribe_packet(uint8_t id, uint8_t *packet) {
+    ESP_LOGI(TAG, "subcribed to id 0x%02X", id);
+
+    packet[0] = DEVICE_ADDRESS_FLIGHT_CONTROLLER;
+    packet[1] = 8;
+    packet[2] = FRAME_TYPE_DIRECT_COMMANDS;
+    packet[3] = DEVICE_ADDRESS_TX_MODULE;
+    packet[4] = DEVICE_ADDRESS_REMOTE_CONTROL;
+    packet[5] = 0x20; // 0x32 0x10
+    packet[6] = 0x01;
+    packet[7] = id;//barometer address
+    packet[8] = 20; // 20ms
+    packet[9] = get_crc8(&packet[2], 6, CRSF_CRC_COMMAND_POLY);
+    packet[10] = get_crc8(&packet[2], 8, CRSF_CRC_POLY);
 }

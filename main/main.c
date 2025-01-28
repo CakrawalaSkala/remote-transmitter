@@ -41,12 +41,16 @@
 
 // Buttons
 // #define RIGHT_POINT GPIO_NUM_27
-#define RIGHT_POINT GPIO_NUM_32
-#define RIGHT_MIDDLE GPIO_NUM_13
-#define RIGHT_RING GPIO_NUM_14
-#define LEFT_POINT GPIO_NUM_35
-#define LEFT_MIDDLE GPIO_NUM_32
-#define LEFT_RING GPIO_NUM_33
+#define RIGHT_POINT GPIO_NUM_33
+#define RIGHT_MIDDLE GPIO_NUM_32
+#define RIGHT_RING GPIO_NUM_35
+#define RIGHT_LITTLE GPIO_NUM_34
+
+#define LEFT_POINT GPIO_NUM_14
+#define LEFT_MIDDLE GPIO_NUM_27
+#define LEFT_RING GPIO_NUM_26
+#define LEFT_LITTLE GPIO_NUM_25
+
 
 button_handle_t arming_button;
 button_handle_t turn180_button;
@@ -54,6 +58,7 @@ button_handle_t switch_id_button;
 button_handle_t mechanism_btn;
 button_handle_t failsafe_btn;
 button_handle_t cam_switch_btn;
+button_handle_t subscribe_button;
 
 // Remote variables
 int8_t current_id = 1;
@@ -62,6 +67,7 @@ uint16_t channels[16] = { 0 };
 bool left_calibrated = 0;
 bool right_calibrated = 0;
 bool should_transmit = 0;
+bool should_subscribe = 1;
 
 bool should_switch = 1;
 
@@ -80,6 +86,11 @@ void switch_id_cb() {
     current_id++;
     current_id %= DRONE_COUNT;
     ESP_LOGI("gpio", "Switch id to %d", current_id);
+}
+
+void subscribe_cb(){
+    should_subscribe = !should_subscribe;
+    ESP_LOGI("subscribe", "subscribe is %d", should_subscribe);
 }
 
 void turn180_cb(){
@@ -113,9 +124,10 @@ void gpio_init() {
     arming_button = init_btn(RIGHT_RING, toggle_channel, (void *)ARMING_CHANNEL); 
     cam_switch_btn = init_btn(RIGHT_MIDDLE, toggle_channel, (void *)CAMSWITCH_CHANNEL);
     mechanism_btn = init_btn(RIGHT_POINT, toggle_channel, (void *)MECHANISM_CHANNEL);
-    // turn180_button = init_btn(LEFT_RING, turn180_cb, NULL);
-    // switch_id_button = init_btn(LEFT_RING, switch_id_cb, NULL);
-    // failsafe_btn = init_btn(LEFT_MIDDLE, toggle_channel, (void *)FAILSAFE_CHANNEL);
+    turn180_button = init_btn(RIGHT_LITTLE, turn180_cb, NULL);
+    switch_id_button = init_btn(LEFT_RING, switch_id_cb, NULL);
+    failsafe_btn = init_btn(LEFT_MIDDLE, toggle_channel, (void *)FAILSAFE_CHANNEL);
+    subscribe_button = init_btn(LEFT_POINT, subscribe_cb, NULL);
 }
 
 void uart_init() {
@@ -152,7 +164,7 @@ void left_imu_task() {
     init_yaw_pid(&yaw_pid);
 
     struct full_imu_data left_imu_data = create_full_imu_data();
-    mpu6050_handle_t imu = imu_init(I2C_NUM_0, MPU6050_I2C_ADDRESS);
+    mpu6050_handle_t imu = imu_init(I2C_NUM_0, MPU6050_I2C_ADDRESS_1);
 
     // Calibration
     for (int i = 0; i < 2000; i++) {
@@ -169,7 +181,7 @@ void left_imu_task() {
     while (true) {
         if(!imu_read(imu, &left_imu_data)) {
             channels[YAW] = MID_CHANNEL_VALUE;
-
+                                                                                
             vTaskDelay(pdMS_TO_TICKS(2));
             continue;
         }
@@ -180,8 +192,8 @@ void left_imu_task() {
     
         applyDeadzone(&left_imu_data.processed.y, 0, 10);
 
-        channels[THROTTLE] = mapValue(left_imu_data.processed.x, -45, 45, 0, MAX_CHANNEL_VALUE);
-        channels[YAW] = mapValue(left_imu_data.processed.y, -45, 45, 0, MAX_CHANNEL_VALUE);
+        channels[THROTTLE] = mapValue(left_imu_data.processed.x, -45, 45, MAX_CHANNEL_VALUE, 0);
+        channels[YAW] = mapValue(left_imu_data.processed.y, -45, 45, MAX_CHANNEL_VALUE, 0);
         
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -189,7 +201,7 @@ void left_imu_task() {
 
 void right_imu_task() {
     struct full_imu_data right_imu_data = create_full_imu_data();
-    mpu6050_handle_t imu = imu_init(I2C_NUM_0, MPU6050_I2C_ADDRESS_1);
+    mpu6050_handle_t imu = imu_init(I2C_NUM_0, MPU6050_I2C_ADDRESS);
 
     // Calibration
     for (int i = 0; i < 2000; i++) {
@@ -220,13 +232,12 @@ void right_imu_task() {
         applyDeadzone(&right_imu_data.processed.y, 0, 10);
         applyDeadzone(&right_imu_data.processed.x, 0, 10);
 
-        channels[ROLL] = mapValue(right_imu_data.processed.y, -45, 45, 0, MAX_CHANNEL_VALUE);
-        channels[PITCH] = mapValue(right_imu_data.processed.x, -45, 45, 0, MAX_CHANNEL_VALUE);
+        channels[ROLL] = mapValue(right_imu_data.processed.y, -45, 45, MAX_CHANNEL_VALUE, 0);
+        channels[PITCH] = mapValue(right_imu_data.processed.x, -45, 45, MAX_CHANNEL_VALUE, 0);
 
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
-
 void elrs_task(void *pvParameters) {
     uint8_t packet[MAX_PACKET_LENGTH] = { 0 };
     uint8_t buffer[256] = {0};
@@ -234,6 +245,17 @@ void elrs_task(void *pvParameters) {
 
     while (true) {
         update_yaw_pid(channels, &yaw_pid, get_interpolated_yaw(&crsf_data.attitude), xTaskGetTickCount() * portTICK_PERIOD_MS);
+        if(should_subscribe){
+            uint8_t packet2[MAX_PACKET_LENGTH] = { 0 };
+            for(int i = 0; i < 5; i++){
+            create_subscribe_packet(0x09, packet2); //baro altitude
+            elrs_send_data(UART_NUM, packet2, MODEL_SWITCH_PACKET_LENGTH);
+            
+            vTaskDelay(pdMS_TO_TICKS(15));
+            
+        }
+        should_subscribe = 0;
+        }
         if (should_switch) {
             create_model_switch_packet(current_id, packet);
             elrs_send_data(UART_NUM, packet, MODEL_SWITCH_PACKET_LENGTH);
@@ -243,6 +265,7 @@ void elrs_task(void *pvParameters) {
             create_crsf_channels_packet(channels, packet);
             elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
             // ESP_LOGI("channel", "a%dfs%did%dmech%dturn%dler%drer%d", channels[ARMING_CHANNEL], channels[FAILSAFE_CHANNEL], current_mechanism, current_id, yaw_pid.is_active, left_error, right_error);
+            ESP_LOGI("telemetry", "alt:%.2f,vspd:%.2f,y:%.2f", crsf_data.baro_alt, crsf_data.vspd, crsf_data.attitude.yaw );
             uart_wait_tx_done(UART_NUM, pdMS_TO_TICKS(15));
             len = uart_read_bytes(UART_NUM, buffer, 256, pdMS_TO_TICKS(15));
             process_crsf_data(buffer, &len, &crsf_data);

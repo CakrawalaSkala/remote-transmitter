@@ -44,6 +44,18 @@ typedef struct {
     uint32_t last_update_time;
 } attitude_data_t;
 
+// Constants for altitude calculations
+#define ALT_MIN_DM 10000                     // minimum altitude in dm (-1000m)
+#define ALT_THRESHOLD_DM (0x8000 - ALT_MIN_DM) // altitude precision change threshold
+#define ALT_MAX_DM ((0x7ffe * 10) - 5)       // maximum altitude in dm
+
+// Structure for barometric data
+typedef struct {
+    uint16_t altitude_packed;       // Altitude above start point
+    int8_t vertical_speed_packed;   // Vertical speed
+} baro_data_t;
+
+
 typedef struct {
     attitude_data_t attitude;
     float baro_alt;
@@ -70,6 +82,7 @@ typedef enum {
 typedef enum {
     COMMAND_CROSSFIRE = 0x10,
     COMMAND_REMOTE_RELATED = 0x3A,
+    COMMAND_SUBSCRIBE = 0x20,
 } crsf_commands_t;
 
 typedef enum {
@@ -78,6 +91,8 @@ typedef enum {
     CROSSFIRE_COMMAND_SET_BIND_ID = 0x03,
     CROSSFIRE_COMMAND_MODEL_SELECT = 0x05,
 } crsf_crossfire_commands_t;
+
+
 
 typedef enum {
     REMOTE_RELATED_COMMANDS_TIMING_CORRECTION = 0x10,
@@ -121,3 +136,12 @@ void elrs_send_data(const int port, const uint8_t *data, size_t len);
 // Packet Creation
 void create_crsf_channels_packet(uint16_t *channels, uint8_t *packet);
 void create_model_switch_packet(uint8_t id, uint8_t *packet);
+
+//baro telemetry
+
+void create_subscribe_packet(uint8_t id, uint8_t *packet);
+
+
+uint16_t get_altitude_packed (int32_t altitude_dm);
+
+int32_t get_altitude_dm(uint16_t packed);

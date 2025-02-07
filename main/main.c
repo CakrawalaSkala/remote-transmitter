@@ -32,7 +32,7 @@
 #define CAMSWITCH_CHANNEL AUX2
 #define MECHANISM_CHANNEL AUX3
 #define FAILSAFE_CHANNEL AUX4
-
+// TODO: nyambungin ke tele
 // Offsets
 #define ROLL_CENTER 0
 #define PITCH_CENTER 0
@@ -54,12 +54,12 @@
 
 
 button_handle_t arming_button;
-button_handle_t turn180_button;
+// button_handle_t turn180_button;
 button_handle_t switch_id_button;
 button_handle_t mechanism_btn;
 button_handle_t failsafe_btn;
 button_handle_t cam_switch_btn;
-button_handle_t subscribe_button;
+// button_handle_t subscribe_button;
 
 // Remote variables
 int8_t current_id = 1;
@@ -68,12 +68,12 @@ uint16_t channels[16] = { 0 };
 bool left_calibrated = 0;
 bool right_calibrated = 0;
 bool should_transmit = 0;
-bool should_subscribe = 1;
+// bool should_subscribe = 1;
 
 bool should_switch = 1;
 
-crsf_data_t crsf_data = {0};
-pid_controller_t yaw_pid;
+// crsf_data_t crsf_data = {0};
+// pid_controller_t yaw_pid;
 
 // Callbacks
 void toggle_channel(void *arg, void *data) {
@@ -95,19 +95,19 @@ void switch_id_cb() {
     ESP_LOGI("gpio", "Switch id to %d", current_id);
 }
 
-void subscribe_cb(){
-    should_subscribe = !should_subscribe;
-    ESP_LOGI("subscribe", "subscribe is %d", should_subscribe);
-}
+// void subscribe_cb(){
+//     should_subscribe = !should_subscribe;
+//     ESP_LOGI("subscribe", "subscribe is %d", should_subscribe);
+// }
 
-void turn180_cb(){
-    if(!yaw_pid.is_active){
-        start_yaw_movement(&yaw_pid, crsf_data.attitude.yaw, normalize_angle(crsf_data.attitude.yaw + 180));
-    } else {
-        yaw_pid.is_active = false;
-    }
-    ESP_LOGI("gpio", "turn is %d", yaw_pid.is_active);
-}
+// void turn180_cb(){
+//     if(!yaw_pid.is_active){
+//         start_yaw_movement(&yaw_pid, crsf_data.attitude.yaw, normalize_angle(crsf_data.attitude.yaw + 180));
+//     } else {
+//         yaw_pid.is_active = false;
+//     }
+//     ESP_LOGI("gpio", "turn is %d", yaw_pid.is_active);
+// }
 
 // Timer
 static void timer_callback(void *arg) {
@@ -128,13 +128,13 @@ void timer_init() {
 // Initializers
 void gpio_init() {
     // init buttons
-    arming_button = init_btn(RIGHT_RING, toggle_channel, (void *)ARMING_CHANNEL); 
-    cam_switch_btn = init_btn(RIGHT_MIDDLE, toggle_channel, (void *)CAMSWITCH_CHANNEL);
-    mechanism_btn = init_btn(RIGHT_POINT, toggle_channel_mechanism, (void *)MECHANISM_CHANNEL);
-    turn180_button = init_btn(RIGHT_LITTLE, turn180_cb, NULL);
-    switch_id_button = init_btn(LEFT_RING, switch_id_cb, NULL);
-    failsafe_btn = init_btn(LEFT_MIDDLE, toggle_channel, (void *)FAILSAFE_CHANNEL);
-    subscribe_button = init_btn(LEFT_POINT, subscribe_cb, NULL);
+    arming_button = init_btn(RIGHT_RING, BUTTON_SINGLE_CLICK, toggle_channel, (void *)ARMING_CHANNEL); 
+    cam_switch_btn = init_btn(RIGHT_MIDDLE, BUTTON_SINGLE_CLICK, toggle_channel, (void *)CAMSWITCH_CHANNEL);
+    mechanism_btn = init_btn(RIGHT_POINT, BUTTON_SINGLE_CLICK, toggle_channel_mechanism, (void *)MECHANISM_CHANNEL);
+    // turn180_button = init_btn(RIGHT_LITTLE, BUTTON_SINGLE_CLICK, turn180_cb, NULL);
+    // switch_id_button = init_btn(LEFT_RING, BUTTON_LONG_PRESS_UP, switch_id_cb, NULL);
+    failsafe_btn = init_btn(LEFT_MIDDLE, BUTTON_SINGLE_CLICK, toggle_channel, (void *)FAILSAFE_CHANNEL);
+    // subscribe_button = init_btn(LEFT_POINT, BUTTON_SINGLE_CLICK, subscribe_cb, NULL);
 }
 
 void uart_init() {
@@ -168,7 +168,7 @@ void i2c_init() {
 
 // Tasks
 void left_imu_task() {
-    init_yaw_pid(&yaw_pid);
+    // init_yaw_pid(&yaw_pid);
 
     struct full_imu_data left_imu_data = create_full_imu_data();
     mpu6050_handle_t imu = imu_init(I2C_NUM_0, MPU6050_I2C_ADDRESS_1);
@@ -253,22 +253,22 @@ void right_imu_task() {
 }
 void elrs_task(void *pvParameters) {
     uint8_t packet[MAX_PACKET_LENGTH] = { 0 };
-    uint8_t buffer[256] = {0};
-    size_t len = 0;
+    // uint8_t buffer[256] = {0};
+    // size_t len = 0;
 
     while (true) {
-        update_yaw_pid(channels, &yaw_pid, get_interpolated_yaw(&crsf_data.attitude), xTaskGetTickCount() * portTICK_PERIOD_MS);
-        if(should_subscribe){
-            uint8_t packet2[MAX_PACKET_LENGTH] = { 0 };
-            for(int i = 0; i < 5; i++){
-            create_subscribe_packet(0x09, packet2); //baro altitude
-            elrs_send_data(UART_NUM, packet2, MODEL_SWITCH_PACKET_LENGTH);
+        // update_yaw_pid(channels, &yaw_pid, get_interpolated_yaw(&crsf_data.attitude), xTaskGetTickCount() * portTICK_PERIOD_MS);
+        // if(should_subscribe){
+        //     uint8_t packet2[MAX_PACKET_LENGTH] = { 0 };
+        //     for(int i = 0; i < 5; i++){
+        //     create_subscribe_packet(0x09, packet2); //baro altitude
+        //     elrs_send_data(UART_NUM, packet2, MODEL_SWITCH_PACKET_LENGTH);
             
-            vTaskDelay(pdMS_TO_TICKS(15));
+        //     vTaskDelay(pdMS_TO_TICKS(15));
             
-        }
-        should_subscribe = 0;
-        }
+        // }
+        // should_subscribe = 0;
+        // }
         if (should_switch) {
             create_model_switch_packet(current_id, packet);
             elrs_send_data(UART_NUM, packet, MODEL_SWITCH_PACKET_LENGTH);
@@ -279,9 +279,6 @@ void elrs_task(void *pvParameters) {
             elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
             // ESP_LOGI("channel", "a%dfs%did%dmech%dturn%dler%drer%d", channels[ARMING_CHANNEL], channels[FAILSAFE_CHANNEL], current_mechanism, current_id, yaw_pid.is_active, left_error, right_error);
             // ESP_LOGI("telemetry", "alt:%.2f,vspd:%.2f,y:%.2f", crsf_data.baro_alt, crsf_data.vspd, crsf_data.attitude.yaw );
-            uart_wait_tx_done(UART_NUM, pdMS_TO_TICKS(15));
-            len = uart_read_bytes(UART_NUM, buffer, 256, pdMS_TO_TICKS(15));
-            process_crsf_data(buffer, &len, &crsf_data);
         }
 
         vTaskDelay(pdMS_TO_TICKS(1));

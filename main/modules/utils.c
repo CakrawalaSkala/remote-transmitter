@@ -1,6 +1,6 @@
 #include "iot_button.h"
 
-button_handle_t init_btn(gpio_num_t gpio, button_cb_t cb, void *usr_data) {
+button_handle_t init_btn(gpio_num_t gpio, button_event_t event, button_cb_t cb, void *usr_data) {
     button_config_t gpio_btn_cfg = {
         .type = BUTTON_TYPE_GPIO,
         .gpio_button_config = {
@@ -10,7 +10,7 @@ button_handle_t init_btn(gpio_num_t gpio, button_cb_t cb, void *usr_data) {
     };
 
     button_handle_t btn = iot_button_create(&gpio_btn_cfg);
-    iot_button_register_cb(btn, BUTTON_SINGLE_CLICK, cb, usr_data);
+    iot_button_register_cb(btn, event, cb, usr_data);
 
     return btn;
 }

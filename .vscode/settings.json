@@ -25,6 +25,6 @@
 		"span": "c",
 		"type_traits": "c"
 	},
-	"idf.portWin": "COM36",
+	"idf.portWin": "COM3",
 	"idf.flashType": "UART"
 }

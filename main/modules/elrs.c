@@ -145,7 +145,7 @@ void parse_frame(const uint8_t *data, crsf_data_t *crsf_data) {
     if (!crsf_data) return;
 
     uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
-    printf("0x%02X ", data[2]);
+    // printf("0x%02X ", data[2]);
     switch (data[2]) {
         case FRAME_TYPE_BARO_ALTITUDE: {
         uint16_t alt_packed = (uint16_t)(data[3] << 8 | data[4]);

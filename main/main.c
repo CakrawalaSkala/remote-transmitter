@@ -46,6 +46,7 @@
 #define RIGHT_RING GPIO_NUM_35
 #define RIGHT_LITTLE GPIO_NUM_34
 
+
 #define LEFT_POINT GPIO_NUM_14
 #define LEFT_MIDDLE GPIO_NUM_27
 #define LEFT_RING GPIO_NUM_26
@@ -78,6 +79,12 @@ pid_controller_t yaw_pid;
 void toggle_channel(void *arg, void *data) {
     crsf_channels_type channel = (crsf_channels_type)data;
     channels[channel] = (channels[channel] <= 1000) * MAX_CHANNEL_VALUE;
+    ESP_LOGI("gpio", "channel %d = %d", channel, channels[channel]);
+}
+
+void toggle_channel_mechanism(void *arg, void *data) {
+    crsf_channels_type channel = (crsf_channels_type)data;
+    channels[channel] = (channels[channel] <= 1000) * MAX_MECHANISM_CHANNEL_VALUE;
     ESP_LOGI("gpio", "channel %d = %d", channel, channels[channel]);
 }
 
@@ -123,7 +130,7 @@ void gpio_init() {
     // init buttons
     arming_button = init_btn(RIGHT_RING, toggle_channel, (void *)ARMING_CHANNEL); 
     cam_switch_btn = init_btn(RIGHT_MIDDLE, toggle_channel, (void *)CAMSWITCH_CHANNEL);
-    mechanism_btn = init_btn(RIGHT_POINT, toggle_channel, (void *)MECHANISM_CHANNEL);
+    mechanism_btn = init_btn(RIGHT_POINT, toggle_channel_mechanism, (void *)MECHANISM_CHANNEL);
     turn180_button = init_btn(RIGHT_LITTLE, turn180_cb, NULL);
     switch_id_button = init_btn(LEFT_RING, switch_id_cb, NULL);
     failsafe_btn = init_btn(LEFT_MIDDLE, toggle_channel, (void *)FAILSAFE_CHANNEL);
@@ -185,6 +192,9 @@ void left_imu_task() {
             vTaskDelay(pdMS_TO_TICKS(2));
             continue;
         }
+        // else{
+        //     ESP_LOGI("imu left", "err left imu");
+        // }
         
         apply_mahony_filter(&mahony, &left_imu_data.gyro, &left_imu_data.acce,
             left_imu_data.delta_t, left_imu_data.q);
@@ -224,6 +234,9 @@ void right_imu_task() {
             vTaskDelay(pdMS_TO_TICKS(2));
             continue;
         }
+        // else{
+        //     ESP_LOGI("imu right", "err right imu");
+        // }
 
         apply_mahony_filter(&mahony, &right_imu_data.gyro, &right_imu_data.acce,
             right_imu_data.delta_t, right_imu_data.q);
@@ -265,7 +278,7 @@ void elrs_task(void *pvParameters) {
             create_crsf_channels_packet(channels, packet);
             elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
             // ESP_LOGI("channel", "a%dfs%did%dmech%dturn%dler%drer%d", channels[ARMING_CHANNEL], channels[FAILSAFE_CHANNEL], current_mechanism, current_id, yaw_pid.is_active, left_error, right_error);
-            ESP_LOGI("telemetry", "alt:%.2f,vspd:%.2f,y:%.2f", crsf_data.baro_alt, crsf_data.vspd, crsf_data.attitude.yaw );
+            // ESP_LOGI("telemetry", "alt:%.2f,vspd:%.2f,y:%.2f", crsf_data.baro_alt, crsf_data.vspd, crsf_data.attitude.yaw );
             uart_wait_tx_done(UART_NUM, pdMS_TO_TICKS(15));
             len = uart_read_bytes(UART_NUM, buffer, 256, pdMS_TO_TICKS(15));
             process_crsf_data(buffer, &len, &crsf_data);

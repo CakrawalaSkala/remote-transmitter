@@ -50,6 +50,8 @@
 #define LEFT_RING GPIO_NUM_26
 #define LEFT_LITTLE GPIO_NUM_25
 
+#define MECHANISM_CHANGE 3
+
 
 button_handle_t arming_button;
 // button_handle_t turn180_button;
@@ -57,7 +59,9 @@ button_handle_t switch_id_button;
 button_handle_t mechanism_btn;
 button_handle_t failsafe_btn;
 button_handle_t cam_switch_btn;
-// button_handle_t subscribe_button;
+button_handle_t increment_mechanism_btn;
+button_handle_t decrement_mechanism_btn;
+
 
 // Remote variables
 int8_t current_id = 1;
@@ -73,6 +77,8 @@ bool should_transmit = 0;
 
 bool should_switch = 1;
 
+uint16_t max_mechanism_value = 1088;
+
 // crsf_data_t crsf_data = {0};
 // pid_controller_t yaw_pid;
 
@@ -85,9 +91,22 @@ void toggle_channel(void *arg, void *data) {
 
 void toggle_channel_mechanism(void *arg, void *data) {
     crsf_channels_type channel = (crsf_channels_type)data;
-    channels[channel] = (channels[channel] <= 1000) * MAX_MECHANISM_CHANNEL_VALUE;
+    channels[channel] = (channels[channel] <= 100) * max_mechanism_value;
     ESP_LOGI("gpio", "channel %d = %d", channel, channels[channel]);
 }
+
+
+void increment_max_mechanism() {
+    max_mechanism_value += MECHANISM_CHANGE;
+    ESP_LOGI("gpio", "max mech = %d", max_mechanism_value);
+}
+
+void decrement_max_mechanism() {
+    max_mechanism_value -= MECHANISM_CHANGE;
+    ESP_LOGI("gpio", "max mech = %d", max_mechanism_value);
+}
+
+
 
 void switch_id_cb() {
     should_switch = 1;
@@ -129,7 +148,7 @@ void timer_init() {
 // Initializers
 void gpio_init() {
     // init buttons
-    arming_button = init_btn(RIGHT_RING, BUTTON_SINGLE_CLICK, toggle_channel, (void *)ARMING_CHANNEL);
+    arming_button = init_debounced_btn(RIGHT_RING, BUTTON_PRESS_DOWN, toggle_channel, (void *)ARMING_CHANNEL, 200);
     cam_switch_btn = init_debounced_btn(RIGHT_MIDDLE, 
                                      BUTTON_PRESS_DOWN, 
                                      toggle_channel, 
@@ -141,9 +160,13 @@ void gpio_init() {
                                      (void *)MECHANISM_CHANNEL,
                                      200);
     // turn180_button = init_btn(RIGHT_LITTLE, BUTTON_SINGLE_CLICK, turn180_cb, NULL);
-    switch_id_button = init_btn(LEFT_RING, BUTTON_LONG_PRESS_UP, switch_id_cb, NULL);
-    failsafe_btn = init_btn(LEFT_MIDDLE, BUTTON_SINGLE_CLICK, toggle_channel, (void *)FAILSAFE_CHANNEL);
+    switch_id_button = init_debounced_btn(LEFT_RING, BUTTON_LONG_PRESS_UP, switch_id_cb, NULL, 200);
+    failsafe_btn = init_debounced_btn(LEFT_MIDDLE, BUTTON_SINGLE_CLICK, toggle_channel, (void *)FAILSAFE_CHANNEL, 200);
+    increment_mechanism_btn = init_debounced_btn(RIGHT_LITTLE, BUTTON_PRESS_DOWN, increment_max_mechanism, NULL, 200);
+    decrement_mechanism_btn = init_debounced_btn(LEFT_LITTLE, BUTTON_PRESS_DOWN, decrement_max_mechanism, NULL, 200);
+
     // subscribe_button = init_btn(LEFT_POINT, BUTTON_SINGLE_CLICK, subscribe_cb, NULL);
+
 }
 
 void uart_init() {

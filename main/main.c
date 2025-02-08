@@ -40,12 +40,10 @@
 #define YAW_CENTER 0
 
 // Buttons
-// #define RIGHT_POINT GPIO_NUM_27
 #define RIGHT_POINT GPIO_NUM_33
 #define RIGHT_MIDDLE GPIO_NUM_32
 #define RIGHT_RING GPIO_NUM_35
 #define RIGHT_LITTLE GPIO_NUM_34
-
 
 #define LEFT_POINT GPIO_NUM_14
 #define LEFT_MIDDLE GPIO_NUM_27
@@ -64,6 +62,9 @@ button_handle_t cam_switch_btn;
 // Remote variables
 int8_t current_id = 1;
 uint16_t channels[16] = { 0 };
+
+int8_t left_error = 0;
+int8_t right_error = 0;
 
 bool left_calibrated = 0;
 bool right_calibrated = 0;
@@ -128,11 +129,19 @@ void timer_init() {
 // Initializers
 void gpio_init() {
     // init buttons
-    arming_button = init_btn(RIGHT_RING, BUTTON_SINGLE_CLICK, toggle_channel, (void *)ARMING_CHANNEL); 
-    cam_switch_btn = init_btn(RIGHT_MIDDLE, BUTTON_SINGLE_CLICK, toggle_channel, (void *)CAMSWITCH_CHANNEL);
-    mechanism_btn = init_btn(RIGHT_POINT, BUTTON_SINGLE_CLICK, toggle_channel_mechanism, (void *)MECHANISM_CHANNEL);
+    arming_button = init_btn(RIGHT_RING, BUTTON_SINGLE_CLICK, toggle_channel, (void *)ARMING_CHANNEL);
+    cam_switch_btn = init_debounced_btn(RIGHT_MIDDLE, 
+                                     BUTTON_PRESS_DOWN, 
+                                     toggle_channel, 
+                                     (void *)CAMSWITCH_CHANNEL,
+                                     200);
+    mechanism_btn = init_debounced_btn(RIGHT_POINT, 
+                                     BUTTON_PRESS_DOWN, 
+                                     toggle_channel_mechanism, 
+                                     (void *)MECHANISM_CHANNEL,
+                                     200);
     // turn180_button = init_btn(RIGHT_LITTLE, BUTTON_SINGLE_CLICK, turn180_cb, NULL);
-    // switch_id_button = init_btn(LEFT_RING, BUTTON_LONG_PRESS_UP, switch_id_cb, NULL);
+    switch_id_button = init_btn(LEFT_RING, BUTTON_LONG_PRESS_UP, switch_id_cb, NULL);
     failsafe_btn = init_btn(LEFT_MIDDLE, BUTTON_SINGLE_CLICK, toggle_channel, (void *)FAILSAFE_CHANNEL);
     // subscribe_button = init_btn(LEFT_POINT, BUTTON_SINGLE_CLICK, subscribe_cb, NULL);
 }
@@ -187,14 +196,22 @@ void left_imu_task() {
 
     while (true) {
         if(!imu_read(imu, &left_imu_data)) {
-            channels[YAW] = MID_CHANNEL_VALUE;
+            ESP_LOGI("imu left", "err left imu");
+            
+            if(!channels[FAILSAFE_CHANNEL]) {
+                left_error++;
+
+                if(left_error > 10) {
+                    ESP_LOGI("imu left", "enabling failsafe");
+                    channels[FAILSAFE_CHANNEL] = MAX_CHANNEL_VALUE;
+                }
+            }
                                                                                 
             vTaskDelay(pdMS_TO_TICKS(2));
             continue;
+        } else if(left_error) {
+            left_error = 0;
         }
-        // else{
-        //     ESP_LOGI("imu left", "err left imu");
-        // }
         
         apply_mahony_filter(&mahony, &left_imu_data.gyro, &left_imu_data.acce,
             left_imu_data.delta_t, left_imu_data.q);
@@ -228,15 +245,24 @@ void right_imu_task() {
 
     while (true) {
         if(!imu_read(imu, &right_imu_data)) {
-            channels[ROLL] = MID_CHANNEL_VALUE;
-            channels[PITCH] = MID_CHANNEL_VALUE;
+            ESP_LOGI("imu right", "err right imu");
+            // channels[ROLL] = MID_CHANNEL_VALUE;
+            // channels[PITCH] = MID_CHANNEL_VALUE;
 
+            if(!channels[FAILSAFE_CHANNEL]) {
+                right_error++;
+
+                if(right_error > 10) {
+                    ESP_LOGI("imu right", "enabling failsafe");
+                    channels[FAILSAFE_CHANNEL] = MAX_CHANNEL_VALUE;
+                }
+            }
+                                                                                
             vTaskDelay(pdMS_TO_TICKS(2));
             continue;
+        } else if(right_error) {
+            right_error = 0;
         }
-        // else{
-        //     ESP_LOGI("imu right", "err right imu");
-        // }
 
         apply_mahony_filter(&mahony, &right_imu_data.gyro, &right_imu_data.acce,
             right_imu_data.delta_t, right_imu_data.q);

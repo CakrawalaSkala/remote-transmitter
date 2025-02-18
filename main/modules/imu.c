@@ -15,6 +15,17 @@ static const float gyro_constant = 250.0 / 32768.0;
 static struct imu_data A_offset1 = { 265.0f, -80.0f, -700.0f };
 static struct imu_data A_offset2 = { 0.994f, 1.000f, 1.014f };
 
+int buttons[] =
+{ GPIO_NUM_33,
+GPIO_NUM_32,
+GPIO_NUM_35,
+GPIO_NUM_34,
+
+GPIO_NUM_14,
+GPIO_NUM_27,
+GPIO_NUM_26,
+GPIO_NUM_25, };
+
 // IMU operator
 void imu_add(struct imu_data *a, struct imu_data b) {
     a->x += b.x;
@@ -85,14 +96,14 @@ esp_err_t imu_read_raw(mpu6050_handle_t mpu6050, struct imu_data *gyro, struct i
     /* Read Gyro Data */
     err = mpu6050_get_raw_gyro(mpu6050, &gyro_data);
     if (err != ESP_OK) {
-        printf("Failed to get gyro data\n");
+        printf("Failed to get gyro data %d\n", err);
         return err;
     }
 
     /* Read Acce Data */
     err = mpu6050_get_raw_acce(mpu6050, &acce_data);
     if (err != ESP_OK) {
-        printf("Failed to get acce data\n");
+        printf("Failed to get acce data %d\n", err);
         return err;
     }
 

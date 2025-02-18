@@ -50,7 +50,7 @@
 #define LEFT_RING GPIO_NUM_26
 #define LEFT_LITTLE GPIO_NUM_25
 
-#define MECHANISM_CHANGE 3
+#define MECHANISM_CHANGE 10
 
 
 button_handle_t arming_button;
@@ -77,7 +77,7 @@ bool should_transmit = 0;
 
 bool should_switch = 1;
 
-uint16_t max_mechanism_value = 1088;
+uint16_t max_mechanism_value = 1378;
 
 // crsf_data_t crsf_data = {0};
 // pid_controller_t yaw_pid;
@@ -149,17 +149,17 @@ void timer_init() {
 void gpio_init() {
     // init buttons
     arming_button = init_debounced_btn(RIGHT_RING, BUTTON_PRESS_DOWN, toggle_channel, (void *)ARMING_CHANNEL, 200);
-    cam_switch_btn = init_debounced_btn(RIGHT_MIDDLE, 
-                                     BUTTON_PRESS_DOWN, 
-                                     toggle_channel, 
-                                     (void *)CAMSWITCH_CHANNEL,
-                                     200);
-    mechanism_btn = init_debounced_btn(RIGHT_POINT, 
-                                     BUTTON_PRESS_DOWN, 
-                                     toggle_channel_mechanism, 
-                                     (void *)MECHANISM_CHANNEL,
-                                     200);
-    // turn180_button = init_btn(RIGHT_LITTLE, BUTTON_SINGLE_CLICK, turn180_cb, NULL);
+    cam_switch_btn = init_debounced_btn(RIGHT_MIDDLE,
+        BUTTON_PRESS_DOWN,
+        toggle_channel,
+        (void *)CAMSWITCH_CHANNEL,
+        200);
+    mechanism_btn = init_debounced_btn(RIGHT_POINT,
+        BUTTON_PRESS_DOWN,
+        toggle_channel_mechanism,
+        (void *)MECHANISM_CHANNEL,
+        200);
+// turn180_button = init_btn(RIGHT_LITTLE, BUTTON_SINGLE_CLICK, turn180_cb, NULL);
     switch_id_button = init_debounced_btn(LEFT_RING, BUTTON_LONG_PRESS_UP, switch_id_cb, NULL, 200);
     failsafe_btn = init_debounced_btn(LEFT_MIDDLE, BUTTON_SINGLE_CLICK, toggle_channel, (void *)FAILSAFE_CHANNEL, 200);
     increment_mechanism_btn = init_debounced_btn(RIGHT_LITTLE, BUTTON_PRESS_DOWN, increment_max_mechanism, NULL, 200);
@@ -192,16 +192,15 @@ void i2c_init() {
         .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_io_num = 22,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 400000,
+        .master.clk_speed = 300000,
     };
     i2c_param_config(I2C_NUM_0, &i2c_config);
     i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
+    i2c_set_timeout(I2C_NUM_0, 0xFFFFF);
 }
 
 // Tasks
 void left_imu_task() {
-    // init_yaw_pid(&yaw_pid);
-
     struct full_imu_data left_imu_data = create_full_imu_data();
     mpu6050_handle_t imu = imu_init(I2C_NUM_0, MPU6050_I2C_ADDRESS_1);
 
@@ -218,34 +217,32 @@ void left_imu_task() {
     struct mahony_filter mahony = create_mahony_filter(NULL);
 
     while (true) {
-        if(!imu_read(imu, &left_imu_data)) {
-            ESP_LOGI("imu left", "err left imu");
-            
-            if(!channels[FAILSAFE_CHANNEL]) {
+        if (!imu_read(imu, &left_imu_data)) {
+            ESP_LOGE("imu left", "err left imu, T=%d, Y=%d", channels[THROTTLE], channels[YAW]);
+
+            if (!channels[FAILSAFE_CHANNEL]) {
                 left_error++;
 
-                if(left_error > 10) {
+                if (left_error > 10) {
                     ESP_LOGI("imu left", "enabling failsafe");
                     channels[FAILSAFE_CHANNEL] = MAX_CHANNEL_VALUE;
                 }
             }
-                                                                                
-            vTaskDelay(pdMS_TO_TICKS(2));
             continue;
-        } else if(left_error) {
+        } else if (left_error) {
             left_error = 0;
         }
-        
+
         apply_mahony_filter(&mahony, &left_imu_data.gyro, &left_imu_data.acce,
             left_imu_data.delta_t, left_imu_data.q);
         imu_process(&left_imu_data);
-    
+
         applyDeadzone(&left_imu_data.processed.y, 0, 10);
 
         channels[THROTTLE] = mapValue(left_imu_data.processed.x, -45, 45, MAX_CHANNEL_VALUE, 0);
         channels[YAW] = mapValue(left_imu_data.processed.y, -45, 45, MAX_CHANNEL_VALUE, 0);
-        
-        vTaskDelay(pdMS_TO_TICKS(10));
+
+        vTaskDelay(pdMS_TO_TICKS(11));
     }
 }
 
@@ -265,25 +262,21 @@ void right_imu_task() {
 
     struct mahony_filter mahony = create_mahony_filter(NULL);
 
-
     while (true) {
-        if(!imu_read(imu, &right_imu_data)) {
-            ESP_LOGI("imu right", "err right imu");
-            // channels[ROLL] = MID_CHANNEL_VALUE;
-            // channels[PITCH] = MID_CHANNEL_VALUE;
+        if (!imu_read(imu, &right_imu_data)) {
+            ESP_LOGE("imu right", "err right imu, R=%d, P=%d", channels[ROLL], channels[PITCH]);
 
-            if(!channels[FAILSAFE_CHANNEL]) {
+            if (!channels[FAILSAFE_CHANNEL]) {
                 right_error++;
 
-                if(right_error > 10) {
+                if (right_error > 10) {
                     ESP_LOGI("imu right", "enabling failsafe");
                     channels[FAILSAFE_CHANNEL] = MAX_CHANNEL_VALUE;
                 }
             }
-                                                                                
-            vTaskDelay(pdMS_TO_TICKS(2));
+
             continue;
-        } else if(right_error) {
+        } else if (right_error) {
             right_error = 0;
         }
 
@@ -312,9 +305,9 @@ void elrs_task(void *pvParameters) {
         //     for(int i = 0; i < 5; i++){
         //     create_subscribe_packet(0x09, packet2); //baro altitude
         //     elrs_send_data(UART_NUM, packet2, MODEL_SWITCH_PACKET_LENGTH);
-            
+
         //     vTaskDelay(pdMS_TO_TICKS(15));
-            
+
         // }
         // should_subscribe = 0;
         // }
@@ -329,20 +322,19 @@ void elrs_task(void *pvParameters) {
             // ESP_LOGI("channel", "a%dfs%did%dmech%dturn%dler%drer%d", channels[ARMING_CHANNEL], channels[FAILSAFE_CHANNEL], current_mechanism, current_id, yaw_pid.is_active, left_error, right_error);
             // ESP_LOGI("telemetry", "alt:%.2f,vspd:%.2f,y:%.2f", crsf_data.baro_alt, crsf_data.vspd, crsf_data.attitude.yaw );
         }
-
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 
 
 
-void app_main(void) {    
+void app_main(void) {
     gpio_init();
     uart_init();
     i2c_init();
     timer_init();
 
-    xTaskCreatePinnedToCore(left_imu_task, "left_imu", 4096, NULL, 4, NULL, 0);
-    xTaskCreatePinnedToCore(right_imu_task, "right_imu", 4096, NULL, 4, NULL, 0);
-    xTaskCreatePinnedToCore(elrs_task, "elrs_writer", 4096, NULL, tskIDLE_PRIORITY, NULL, 1);
-}  
+    xTaskCreatePinnedToCore(left_imu_task, "left_imu", 4096, NULL, 4, NULL, 1);
+    xTaskCreatePinnedToCore(right_imu_task, "right_imu", 4096, NULL, 4, NULL, 1);
+    xTaskCreatePinnedToCore(elrs_task, "elrs_writer", 4096, NULL, tskIDLE_PRIORITY, NULL, 0);
+}

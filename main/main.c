@@ -216,6 +216,12 @@ void left_imu_task() {
 
     struct mahony_filter mahony = create_mahony_filter(NULL);
 
+    TickType_t xLastWakeTime;
+    const TickType_t xFrequency = pdMS_TO_TICKS(10);
+
+    // Initialize the xLastWakeTime variable with the current time
+    xLastWakeTime = xTaskGetTickCount();
+
     while (true) {
         if (!imu_read(imu, &left_imu_data)) {
             ESP_LOGE("imu left", "err left imu, T=%d, Y=%d", channels[THROTTLE], channels[YAW]);
@@ -242,7 +248,8 @@ void left_imu_task() {
         channels[THROTTLE] = mapValue(left_imu_data.processed.x, -45, 45, MAX_CHANNEL_VALUE, 0);
         channels[YAW] = mapValue(left_imu_data.processed.y, -45, 45, MAX_CHANNEL_VALUE, 0);
 
-        vTaskDelay(pdMS_TO_TICKS(11));
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+        xLastWakeTime = xTaskGetTickCount();
     }
 }
 
@@ -261,6 +268,13 @@ void right_imu_task() {
     right_calibrated = 1;
 
     struct mahony_filter mahony = create_mahony_filter(NULL);
+
+    // Add TickType_t variables for precise timing
+    TickType_t xLastWakeTime;
+    const TickType_t xFrequency = pdMS_TO_TICKS(10);
+
+    // Initialize the xLastWakeTime variable with the current time
+    xLastWakeTime = xTaskGetTickCount();
 
     while (true) {
         if (!imu_read(imu, &right_imu_data)) {
@@ -290,7 +304,8 @@ void right_imu_task() {
         channels[ROLL] = mapValue(right_imu_data.processed.y, -45, 45, MAX_CHANNEL_VALUE, 0);
         channels[PITCH] = mapValue(right_imu_data.processed.x, -45, 45, MAX_CHANNEL_VALUE, 0);
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+        xLastWakeTime = xTaskGetTickCount();
     }
 }
 void elrs_task(void *pvParameters) {

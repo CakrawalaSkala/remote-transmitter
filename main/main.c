@@ -106,9 +106,17 @@ void decrement_max_mechanism() {
     ESP_LOGI("gpio", "max mech = %d", max_mechanism_value);
 }
 
+void toggle_arming() {
+    if (iot_button_get_ticks_time(arming_button) < 500) return;
+
+    channels[ARMING_CHANNEL] = (channels[ARMING_CHANNEL] <= 1000) * MAX_CHANNEL_VALUE;
+    ESP_LOGI("gpio", "channel %d = %d", ARMING_CHANNEL, channels[ARMING_CHANNEL]);
+}
 
 
 void switch_id_cb() {
+    if (iot_button_get_ticks_time(switch_id_button) < 500) return;
+
     should_switch = 1;
     current_id++;
     current_id %= DRONE_COUNT;
@@ -148,7 +156,7 @@ void timer_init() {
 // Initializers
 void gpio_init() {
     // init buttons
-    arming_button = init_debounced_btn(RIGHT_RING, BUTTON_PRESS_DOWN, toggle_channel, (void *)ARMING_CHANNEL, 200);
+    arming_button = init_debounced_btn(RIGHT_RING, BUTTON_PRESS_UP, toggle_arming, NULL, 200);
     cam_switch_btn = init_debounced_btn(RIGHT_MIDDLE,
         BUTTON_PRESS_DOWN,
         toggle_channel,
@@ -160,7 +168,7 @@ void gpio_init() {
         (void *)MECHANISM_CHANNEL,
         200);
 // turn180_button = init_btn(RIGHT_LITTLE, BUTTON_SINGLE_CLICK, turn180_cb, NULL);
-    switch_id_button = init_debounced_btn(LEFT_RING, BUTTON_LONG_PRESS_UP, switch_id_cb, NULL, 200);
+    switch_id_button = init_debounced_btn(LEFT_RING, BUTTON_PRESS_UP, switch_id_cb, NULL, 200);
     failsafe_btn = init_debounced_btn(LEFT_MIDDLE, BUTTON_SINGLE_CLICK, toggle_channel, (void *)FAILSAFE_CHANNEL, 200);
     increment_mechanism_btn = init_debounced_btn(RIGHT_LITTLE, BUTTON_PRESS_DOWN, increment_max_mechanism, NULL, 200);
     decrement_mechanism_btn = init_debounced_btn(LEFT_LITTLE, BUTTON_PRESS_DOWN, decrement_max_mechanism, NULL, 200);

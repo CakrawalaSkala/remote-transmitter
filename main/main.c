@@ -32,6 +32,7 @@
 #define CAMSWITCH_CHANNEL AUX2
 #define MECHANISM_CHANNEL AUX3
 #define FAILSAFE_CHANNEL AUX4
+#define PIT_MODE_CHANNEL AUX5
 // TODO: nyambungin ke tele
 // Offsets
 #define ROLL_CENTER 0
@@ -77,7 +78,7 @@ bool should_transmit = 0;
 
 bool should_switch = 1;
 
-uint16_t max_mechanism_value = 1378;
+uint16_t max_mechanism_value = 1430;
 
 // crsf_data_t crsf_data = {0};
 // pid_controller_t yaw_pid;
@@ -242,7 +243,6 @@ void left_imu_task() {
                     channels[FAILSAFE_CHANNEL] = MAX_CHANNEL_VALUE;
                 }
             }
-            continue;
         } else if (left_error) {
             left_error = 0;
         }
@@ -296,8 +296,6 @@ void right_imu_task() {
                     channels[FAILSAFE_CHANNEL] = MAX_CHANNEL_VALUE;
                 }
             }
-
-            continue;
         } else if (right_error) {
             right_error = 0;
         }
@@ -334,16 +332,18 @@ void elrs_task(void *pvParameters) {
         // }
         // should_subscribe = 0;
         // }
-        if (should_switch) {
-            create_model_switch_packet(current_id, packet);
-            elrs_send_data(UART_NUM, packet, MODEL_SWITCH_PACKET_LENGTH);
-            should_switch = 0;
-        } else if (should_transmit && left_calibrated && right_calibrated) {
-            should_transmit = 0;
-            create_crsf_channels_packet(channels, packet);
-            elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
-            // ESP_LOGI("channel", "a%dfs%did%dmech%dturn%dler%drer%d", channels[ARMING_CHANNEL], channels[FAILSAFE_CHANNEL], current_mechanism, current_id, yaw_pid.is_active, left_error, right_error);
-            // ESP_LOGI("telemetry", "alt:%.2f,vspd:%.2f,y:%.2f", crsf_data.baro_alt, crsf_data.vspd, crsf_data.attitude.yaw );
+        if (left_calibrated && right_calibrated) {
+            if (should_switch) {
+                create_model_switch_packet(current_id, packet);
+                elrs_send_data(UART_NUM, packet, MODEL_SWITCH_PACKET_LENGTH);
+                should_switch = 0;
+            } else if (should_transmit) {
+                should_transmit = 0;
+                create_crsf_channels_packet(channels, packet);
+                elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
+                // ESP_LOGI("channel", "a%dfs%did%dmech%dturn%dler%drer%d", channels[ARMING_CHANNEL], channels[FAILSAFE_CHANNEL], current_mechanism, current_id, yaw_pid.is_active, left_error, right_error);
+                // ESP_LOGI("telemetry", "alt:%.2f,vspd:%.2f,y:%.2f", crsf_data.baro_alt, crsf_data.vspd, crsf_data.attitude.yaw );
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(1));
     }
@@ -352,6 +352,8 @@ void elrs_task(void *pvParameters) {
 
 
 void app_main(void) {
+    channels[PIT_MODE_CHANNEL] = MAX_CHANNEL_VALUE;
+
     gpio_init();
     uart_init();
     i2c_init();

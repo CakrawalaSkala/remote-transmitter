@@ -332,13 +332,14 @@ void elrs_task(void *pvParameters) {
         // }
         // should_subscribe = 0;
         // }
-        if (left_calibrated && right_calibrated) {
+        if (should_transmit && left_calibrated && right_calibrated) {
+            should_transmit = 0;
+
             if (should_switch) {
                 create_model_switch_packet(current_id, packet);
                 elrs_send_data(UART_NUM, packet, MODEL_SWITCH_PACKET_LENGTH);
                 should_switch = 0;
-            } else if (should_transmit) {
-                should_transmit = 0;
+            } else {
                 create_crsf_channels_packet(channels, packet);
                 elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
                 // ESP_LOGI("channel", "a%dfs%did%dmech%dturn%dler%drer%d", channels[ARMING_CHANNEL], channels[FAILSAFE_CHANNEL], current_mechanism, current_id, yaw_pid.is_active, left_error, right_error);

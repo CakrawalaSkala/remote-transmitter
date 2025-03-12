@@ -121,10 +121,10 @@ float get_interpolated_yaw(attitude_data_t *attitude) {
 
 // Convert packed altitude to meters
 float unpack_altitude_to_meters(uint16_t packed) {
-    int32_t altitude_dm = (packed & 0x8000) ? 
-                         ((packed & 0x7fff) * 10) :  // Meter resolution case
-                         (packed - ALT_MIN_DM);      // Decimeter resolution case
-    
+    int32_t altitude_dm = (packed & 0x8000) ?
+        ((packed & 0x7fff) * 10) :  // Meter resolution case
+        (packed - ALT_MIN_DM);      // Decimeter resolution case
+
     return (float)altitude_dm / 10.0f;  // Convert decimeters to meters
 }
 
@@ -148,18 +148,18 @@ void parse_frame(const uint8_t *data, crsf_data_t *crsf_data) {
     // printf("0x%02X ", data[2]);
     switch (data[2]) {
         case FRAME_TYPE_BARO_ALTITUDE: {
-        uint16_t alt_packed = (uint16_t)(data[3] << 8 | data[4]);
-        int8_t speed_packed = (int8_t)data[5];
-        
-        crsf_data->baro_alt = unpack_altitude_to_meters(alt_packed);
-        crsf_data->vspd = unpack_vertical_speed(speed_packed);
-        
-        // For debug printing
-        ESP_LOGI("tlm", "Altitude: %.2f m, Vertical Speed: %.2f m/s\n", 
-            crsf_data->baro_alt, 
-            crsf_data->vspd);
-        break;
-        
+            uint16_t alt_packed = (uint16_t)(data[3] << 8 | data[4]);
+            int8_t speed_packed = (int8_t)data[5];
+
+            crsf_data->baro_alt = unpack_altitude_to_meters(alt_packed);
+            crsf_data->vspd = unpack_vertical_speed(speed_packed);
+
+            // For debug printing
+            ESP_LOGI("tlm", "Altitude: %.2f m, Vertical Speed: %.2f m/s\n",
+                crsf_data->baro_alt,
+                crsf_data->vspd);
+            break;
+
         case FRAME_TYPE_ATTITUDE:
             crsf_data->attitude.pitch = (float)((int16_t)((data[3] << 8 | data[4])) / 10000.0f) * RAD_TO_DEG;
             crsf_data->attitude.roll = (float)((int16_t)((data[5] << 8 | data[6])) / 10000.0f) * RAD_TO_DEG;
@@ -177,12 +177,12 @@ void parse_frame(const uint8_t *data, crsf_data_t *crsf_data) {
             break;
         // case FRAME_TYPE_VARIO:
         //     crsf_data->vspd = (float)((int16_t)(data[3] << 8 | data[5])) / 10.0;
-        
-        
-    default:
+
+
+        default:
             break;
+        }
     }
-}
 }
 void process_crsf_data(uint8_t *input_buffer, size_t *input_len, crsf_data_t *crsf_data) {
     if (!input_buffer || !input_len || !crsf_data) return;
@@ -250,8 +250,6 @@ void elrs_send_data(const int port, const uint8_t *data, size_t len) {
     if (uart_write_bytes(port, data, len) != len) {
         ESP_LOGE(TAG, "Send data critical failure.");
     }
-
-    uart_wait_tx_done(port, pdMS_TO_TICKS(100));
 }
 
 

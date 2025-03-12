@@ -66,14 +66,16 @@ button_handle_t decrement_mechanism_btn;
 // Remote variables
 int8_t current_id = 1;
 uint16_t channels[16] = { 0 };
+uint16_t last_throttle = 0;
 
 int8_t left_error = 0;
 int8_t right_error = 0;
+int8_t imu_stuck_counter = 0;
+int8_t IMU_STUCK_THRESHOLD = 3;
 
 bool left_calibrated = 0;
 bool right_calibrated = 0;
 bool should_transmit = 0;
-// bool should_subscribe = 1;
 
 bool should_switch = 1;
 
@@ -89,10 +91,9 @@ void toggle_channel(void *arg, void *data) {
     ESP_LOGI("gpio", "channel %d = %d", channel, channels[channel]);
 }
 
-void toggle_channel_mechanism(void *arg, void *data) {
-    crsf_channels_type channel = (crsf_channels_type)data;
-    channels[channel] = (channels[channel] <= 100) * max_mechanism_value;
-    ESP_LOGI("gpio", "channel %d = %d", channel, channels[channel]);
+void toggle_channel_mechanism() {
+    channels[MECHANISM_CHANNEL] = (channels[MECHANISM_CHANNEL] <= 100) * max_mechanism_value;
+    ESP_LOGI("gpio", "channel %d = %d", MECHANISM_CHANNEL, channels[MECHANISM_CHANNEL]);
 }
 
 
@@ -165,11 +166,11 @@ void gpio_init() {
     mechanism_btn = init_debounced_btn(RIGHT_POINT,
         BUTTON_PRESS_DOWN,
         toggle_channel_mechanism,
-        (void *)MECHANISM_CHANNEL,
+        NULL,
         200);
 // turn180_button = init_btn(RIGHT_LITTLE, BUTTON_SINGLE_CLICK, turn180_cb, NULL);
     switch_id_button = init_debounced_btn(LEFT_RING, BUTTON_PRESS_UP, switch_id_cb, NULL, 200);
-    failsafe_btn = init_debounced_btn(LEFT_MIDDLE, BUTTON_SINGLE_CLICK, toggle_channel, (void *)FAILSAFE_CHANNEL, 200);
+    failsafe_btn = init_debounced_btn(LEFT_MIDDLE, BUTTON_PRESS_UP, toggle_channel, (void *)FAILSAFE_CHANNEL, 200);
     increment_mechanism_btn = init_debounced_btn(RIGHT_LITTLE, BUTTON_PRESS_DOWN, increment_max_mechanism, NULL, 200);
     decrement_mechanism_btn = init_debounced_btn(LEFT_LITTLE, BUTTON_PRESS_DOWN, decrement_max_mechanism, NULL, 200);
 
@@ -204,7 +205,7 @@ void i2c_init() {
     };
     i2c_param_config(I2C_NUM_0, &i2c_config);
     i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
-    i2c_set_timeout(I2C_NUM_0, 0xFFFFF);
+    // i2c_set_timeout(I2C_NUM_0, 0xFFFFF);
 }
 
 // Tasks
@@ -223,12 +224,6 @@ void left_imu_task() {
     ESP_LOGI(TAG, "Left Gyro calibration done!");
 
     struct mahony_filter mahony = create_mahony_filter(NULL);
-
-    TickType_t xLastWakeTime;
-    const TickType_t xFrequency = pdMS_TO_TICKS(10);
-
-    // Initialize the xLastWakeTime variable with the current time
-    xLastWakeTime = xTaskGetTickCount();
 
     while (true) {
         if (!imu_read(imu, &left_imu_data)) {
@@ -256,8 +251,20 @@ void left_imu_task() {
         channels[THROTTLE] = mapValue(left_imu_data.processed.x, -45, 45, MAX_CHANNEL_VALUE, 0);
         channels[YAW] = mapValue(left_imu_data.processed.y, -45, 45, MAX_CHANNEL_VALUE, 0);
 
-        vTaskDelayUntil(&xLastWakeTime, xFrequency);
-        xLastWakeTime = xTaskGetTickCount();
+
+        if (imu_stuck_counter > IMU_STUCK_THRESHOLD) {
+            ESP_LOGI("imu left", "y%.2fx%.2f", left_imu_data.processed.y, left_imu_data.processed.x);
+        } else if (channels[THROTTLE] > 0 && channels[THROTTLE] < MAX_CHANNEL_VALUE) {
+            if (channels[THROTTLE] == last_throttle) {
+                imu_stuck_counter++;
+            } else {
+                imu_stuck_counter = 0;
+            }
+        }
+
+        last_throttle = channels[THROTTLE];
+
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -277,13 +284,6 @@ void right_imu_task() {
 
     struct mahony_filter mahony = create_mahony_filter(NULL);
 
-    // Add TickType_t variables for precise timing
-    TickType_t xLastWakeTime;
-    const TickType_t xFrequency = pdMS_TO_TICKS(10);
-
-    // Initialize the xLastWakeTime variable with the current time
-    xLastWakeTime = xTaskGetTickCount();
-
     while (true) {
         if (!imu_read(imu, &right_imu_data)) {
             ESP_LOGE("imu right", "err right imu, R=%d, P=%d", channels[ROLL], channels[PITCH]);
@@ -302,6 +302,7 @@ void right_imu_task() {
             right_error = 0;
         }
 
+
         apply_mahony_filter(&mahony, &right_imu_data.gyro, &right_imu_data.acce,
             right_imu_data.delta_t, right_imu_data.q);
         imu_process(&right_imu_data);
@@ -312,8 +313,11 @@ void right_imu_task() {
         channels[ROLL] = mapValue(right_imu_data.processed.y, -45, 45, MAX_CHANNEL_VALUE, 0);
         channels[PITCH] = mapValue(right_imu_data.processed.x, -45, 45, MAX_CHANNEL_VALUE, 0);
 
-        vTaskDelayUntil(&xLastWakeTime, xFrequency);
-        xLastWakeTime = xTaskGetTickCount();
+        if (imu_stuck_counter > IMU_STUCK_THRESHOLD) {
+            ESP_LOGI("imu right", "y%.2fx%.2f", right_imu_data.processed.y, right_imu_data.processed.x);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 void elrs_task(void *pvParameters) {
@@ -334,19 +338,26 @@ void elrs_task(void *pvParameters) {
         // }
         // should_subscribe = 0;
         // }
-        if (should_switch) {
-            create_model_switch_packet(current_id, packet);
-            elrs_send_data(UART_NUM, packet, MODEL_SWITCH_PACKET_LENGTH);
-            should_switch = 0;
-        } else if (should_transmit && left_calibrated && right_calibrated) {
+        if (should_transmit && left_calibrated && right_calibrated) {
             should_transmit = 0;
-            create_crsf_channels_packet(channels, packet);
-            elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
-            // ESP_LOGI("channel", "a%dfs%did%dmech%dturn%dler%drer%d", channels[ARMING_CHANNEL], channels[FAILSAFE_CHANNEL], current_mechanism, current_id, yaw_pid.is_active, left_error, right_error);
-            // ESP_LOGI("telemetry", "alt:%.2f,vspd:%.2f,y:%.2f", crsf_data.baro_alt, crsf_data.vspd, crsf_data.attitude.yaw );
+            if (should_switch) {
+                create_model_switch_packet(current_id, packet);
+                elrs_send_data(UART_NUM, packet, MODEL_SWITCH_PACKET_LENGTH);
+                should_switch = 0;
+            } else {
+                create_crsf_channels_packet(channels, packet);
+                elrs_send_data(UART_NUM, packet, CHANNEL_PACKET_LENGTH);
+                // ESP_LOGI("channel", "mech = %d", channels[MECHANISM_CHANNEL]);
+                // ESP_LOGI("channel", "r%dp%dy%da%d", channels[ROLL], channels[PITCH], channels[YAW], channels[ARMING_CHANNEL]);
+                // ESP_LOGI("telemetry", "alt:%.2f,vspd:%.2f,y:%.2f", crsf_data.baro_alt, crsf_data.vspd, crsf_data.attitude.yaw );
+            }
+
         }
+
         vTaskDelay(pdMS_TO_TICKS(1));
     }
+
+
 }
 
 
